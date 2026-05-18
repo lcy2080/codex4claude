@@ -2,6 +2,7 @@
 description: Build a scoped implementation plan with verification gates
 argument-hint: [task]
 model: opus
+effort: xhigh
 ---
 
 Task: $ARGUMENTS

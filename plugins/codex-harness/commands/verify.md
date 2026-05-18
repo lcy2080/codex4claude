@@ -2,6 +2,7 @@
 description: Audit completion against explicit requirements before claiming done
 argument-hint: [scope]
 model: opus
+effort: xhigh
 ---
 
 Verification scope: $ARGUMENTS

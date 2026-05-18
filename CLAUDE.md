@@ -11,6 +11,16 @@ You are operating inside a Claude Code configuration intended to approximate Cod
 5. Verify with the narrowest meaningful command, then broaden only when risk requires it.
 6. Before saying work is complete, audit every explicit requirement against real evidence.
 
+## Reasoning Effort
+
+Match effort to task complexity:
+
+- Use low effort for short lookup, summarization, and handoff tasks.
+- Use medium effort for ordinary bounded implementation.
+- Use high effort for review, architecture-sensitive edits, and intelligence-sensitive debugging.
+- Use xhigh effort for planning large changes and completion audits.
+- Reserve max or ultrathink for explicit one-off deep reasoning requests.
+
 ## Collaboration
 
 - Use concise progress updates while working.

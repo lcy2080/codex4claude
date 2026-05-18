@@ -2,6 +2,7 @@
 description: Prepare a concise handoff for unfinished work
 argument-hint: [scope]
 model: haiku
+effort: low
 ---
 
 Handoff scope: $ARGUMENTS

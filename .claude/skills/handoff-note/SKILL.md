@@ -1,5 +1,6 @@
 ---
 description: Use when pausing or transferring unfinished work. Produces a concise continue.md with objective, completed evidence, remaining tasks, and resume context.
+effort: low
 ---
 
 # Handoff Note

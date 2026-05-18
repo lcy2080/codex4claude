@@ -101,9 +101,50 @@ foreach ($relativePath in $modelFiles) {
   }
 }
 
+$effortFiles = @(
+  ".claude/agents/context-explorer.md",
+  ".claude/agents/implementation-worker.md",
+  ".claude/agents/code-reviewer.md",
+  ".claude/agents/verification-auditor.md",
+  ".claude/commands/plan.md",
+  ".claude/commands/implement.md",
+  ".claude/commands/review.md",
+  ".claude/commands/verify.md",
+  ".claude/commands/handoff.md",
+  ".claude/skills/completion-audit/SKILL.md",
+  ".claude/skills/surgical-editing/SKILL.md",
+  ".claude/skills/context-triage/SKILL.md",
+  ".claude/skills/handoff-note/SKILL.md",
+  "plugins/codex-harness/agents/codex-main.md",
+  "plugins/codex-harness/agents/context-explorer.md",
+  "plugins/codex-harness/agents/implementation-worker.md",
+  "plugins/codex-harness/agents/code-reviewer.md",
+  "plugins/codex-harness/agents/verification-auditor.md",
+  "plugins/codex-harness/commands/plan.md",
+  "plugins/codex-harness/commands/implement.md",
+  "plugins/codex-harness/commands/review.md",
+  "plugins/codex-harness/commands/verify.md",
+  "plugins/codex-harness/commands/handoff.md",
+  "plugins/codex-harness/skills/completion-audit/SKILL.md",
+  "plugins/codex-harness/skills/surgical-editing/SKILL.md",
+  "plugins/codex-harness/skills/context-triage/SKILL.md",
+  "plugins/codex-harness/skills/handoff-note/SKILL.md"
+)
+
+foreach ($relativePath in $effortFiles) {
+  $path = Join-Path $root $relativePath
+  $content = Get-Content -LiteralPath $path -Raw
+  if ($content -notmatch "(?m)^effort:\s+(low|medium|high|xhigh|max)\s*$") {
+    Write-Error "Missing or unsupported effort assignment: $relativePath"
+  }
+}
+
 $projectSettings = Get-Content -LiteralPath (Join-Path $root ".claude/settings.json") -Raw | ConvertFrom-Json
 if ($projectSettings.model -ne "sonnet") {
   Write-Error "Expected .claude/settings.json model to be sonnet."
+}
+if ($projectSettings.effortLevel -ne "medium") {
+  Write-Error "Expected .claude/settings.json effortLevel to be medium."
 }
 
 Write-Host "Harness verification passed."

@@ -14,10 +14,12 @@ The plugin provides:
 - `output-styles/`: `Codex Harness` system-prompt overlay.
 - `settings.json`: default main-thread agent activation.
 
-Model policy:
+Model and effort policy:
 
-- `haiku`: context lookup and handoff notes.
-- `sonnet`: bounded implementation and default project work.
-- `opus`: main harness agent, complex planning, review, and verification audits.
+- `haiku` + `low`: context lookup and handoff notes.
+- `sonnet` + `medium`: bounded implementation and default project work.
+- `sonnet`/`opus` + `high`: review and architecture-sensitive debugging.
+- `opus` + `xhigh`: complex planning and verification audits.
+- `max` or `ultrathink`: explicit one-off deep reasoning only.
 
 After loading, run `/reload-plugins`, `/help`, and `/agents` to confirm the components are visible.

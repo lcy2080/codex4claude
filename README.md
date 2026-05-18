@@ -46,7 +46,7 @@ claude --plugin-dir ./plugins/codex-harness
 - 작은 범위의 구현
 - review와 verification 분리
 - 완료 전 requirement-to-evidence 감사
-- 복잡도에 따른 모델 선택
+- 복잡도에 따른 모델과 think level 선택
 - 다른 프로젝트에 배포 가능한 plugin 패키징
 
 ## Daily Workflow
@@ -85,11 +85,11 @@ claude --plugin-dir ./plugins/codex-harness
 
 ## Slash Commands
 
-- `/plan <task>`: 작업 범위, 가정, 변경 후보, 검증 방법을 정리합니다. 복잡한 판단이 필요하므로 `opus`를 사용합니다.
-- `/implement <task>`: 파일을 읽고 좁은 범위로 수정한 뒤 검증합니다. 기본 구현 작업에 적합한 `sonnet`을 사용합니다.
-- `/review <scope>`: 버그, 회귀, 보안 이슈, 누락된 테스트를 findings-first 형식으로 찾습니다. 고위험 검토이므로 `opus`를 사용합니다.
-- `/verify <scope>`: 명시 요구사항을 실제 파일, 명령 출력, 테스트 결과에 매핑합니다. 완료 판단용이므로 `opus`를 사용합니다.
-- `/handoff <scope>`: 다음 세션이 이어받을 수 있는 간단한 상태 문서를 만듭니다. 요약 작업이므로 `haiku`를 사용합니다.
+- `/plan <task>`: 작업 범위, 가정, 변경 후보, 검증 방법을 정리합니다. `opus`와 `xhigh` effort를 사용합니다.
+- `/implement <task>`: 파일을 읽고 좁은 범위로 수정한 뒤 검증합니다. `sonnet`과 `medium` effort를 사용합니다.
+- `/review <scope>`: 버그, 회귀, 보안 이슈, 누락된 테스트를 findings-first 형식으로 찾습니다. `opus`와 `high` effort를 사용합니다.
+- `/verify <scope>`: 명시 요구사항을 실제 파일, 명령 출력, 테스트 결과에 매핑합니다. `opus`와 `xhigh` effort를 사용합니다.
+- `/handoff <scope>`: 다음 세션이 이어받을 수 있는 간단한 상태 문서를 만듭니다. `haiku`와 `low` effort를 사용합니다.
 
 플러그인으로 로드한 skills는 namespace가 붙습니다. 예를 들어 completion audit skill은 다음처럼 호출합니다.
 
@@ -101,11 +101,11 @@ claude --plugin-dir ./plugins/codex-harness
 
 Claude Code의 `/agents` 화면에서 다음 subagent를 확인할 수 있습니다.
 
-- `context-explorer`: 특정 코드베이스 질문에 답합니다. 읽기 전용이며 `haiku`를 사용합니다.
-- `implementation-worker`: 소유 범위가 분명한 구현 작업을 수행합니다. 편집 권한이 있으며 `sonnet`을 사용합니다.
-- `code-reviewer`: 변경 후 버그, 회귀, 보안 문제, 테스트 누락을 찾습니다. `sonnet`을 사용합니다.
-- `verification-auditor`: 완료 전 요구사항과 증거를 대조합니다. `opus`를 사용합니다.
-- `codex-main`: 플러그인 사용 시 main-thread agent로 동작합니다. 전체 harness 판단을 담당하므로 `opus`를 사용합니다.
+- `context-explorer`: 특정 코드베이스 질문에 답합니다. 읽기 전용이며 `haiku`와 `low` effort를 사용합니다.
+- `implementation-worker`: 소유 범위가 분명한 구현 작업을 수행합니다. 편집 권한이 있으며 `sonnet`과 `medium` effort를 사용합니다.
+- `code-reviewer`: 변경 후 버그, 회귀, 보안 문제, 테스트 누락을 찾습니다. `sonnet`과 `high` effort를 사용합니다.
+- `verification-auditor`: 완료 전 요구사항과 증거를 대조합니다. `opus`와 `xhigh` effort를 사용합니다.
+- `codex-main`: 플러그인 사용 시 main-thread agent로 동작합니다. 전체 harness 판단을 담당하므로 `opus`와 `high` effort를 사용합니다.
 
 명시적으로 agent를 호출하려면 Claude Code에서 agent mention을 사용하거나 자연어로 요청합니다.
 
@@ -128,15 +128,18 @@ Harness에는 다음 reusable workflow가 포함됩니다.
 - `completion-audit`: 완료 전 모든 요구사항을 실제 증거에 매핑합니다.
 - `handoff-note`: 작업 중단 또는 세션 전환을 위한 짧은 handoff를 작성합니다.
 
-## Model Policy
+## Model And Effort Policy
 
-복잡도에 따라 모델을 나눕니다.
+복잡도에 따라 모델과 think level을 함께 나눕니다.
 
-- `haiku`: 단순 탐색, 요약, handoff
-- `sonnet`: 일반 구현, bounded worker, 기본 main-thread 작업
-- `opus`: 복잡한 계획, 고위험 리뷰, 완료 감사, 플러그인 main agent
+- `haiku` + `low`: 단순 탐색, 요약, handoff
+- `sonnet` + `medium`: 일반 구현, bounded worker, 기본 main-thread 작업
+- `sonnet`/`opus` + `high`: 리뷰, 구조 영향이 있는 변경, 어려운 디버깅
+- `opus` + `xhigh`: 복잡한 계획, 완료 감사, 요구사항 대조
+- `max` 또는 `ultrathink`: 명시적으로 매우 깊은 1회성 reasoning이 필요할 때만 사용
 
 주의: `CLAUDE_CODE_SUBAGENT_MODEL` 환경 변수가 설정되어 있으면 subagent frontmatter의 모델보다 우선합니다. 전체 subagent 모델이 예상과 다르게 동작하면 이 환경 변수를 먼저 확인합니다.
+`CLAUDE_CODE_EFFORT_LEVEL` 환경 변수가 설정되어 있으면 frontmatter의 `effort`보다 우선합니다.
 
 ## Configuration Layout
 
@@ -163,7 +166,9 @@ pwsh -File scripts/verify-harness.ps1
 - JSON 구성 파일 파싱 가능 여부
 - Markdown frontmatter 존재 여부
 - commands와 agents의 모델 할당 여부
+- commands, agents, skills의 effort 할당 여부
 - 프로젝트 기본 모델이 `sonnet`인지 여부
+- 프로젝트 기본 effort가 `medium`인지 여부
 
 성공하면 다음과 비슷한 출력이 나옵니다.
 

@@ -1,5 +1,6 @@
 ---
 description: Use when making code or configuration edits where scope control matters. Enforces read-before-write, minimal diffs, local style matching, and preservation of unrelated user changes.
+effort: medium
 ---
 
 # Surgical Editing

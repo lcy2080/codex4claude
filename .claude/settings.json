@@ -1,6 +1,7 @@
 {
   "includeCoAuthoredBy": false,
   "model": "sonnet",
+  "effortLevel": "medium",
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [

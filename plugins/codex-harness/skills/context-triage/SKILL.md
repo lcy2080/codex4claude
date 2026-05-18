@@ -1,5 +1,6 @@
 ---
 description: Use at the start of unfamiliar repository work to gather just enough context for a safe plan without over-reading or anchoring on irrelevant files.
+effort: low
 ---
 
 # Context Triage

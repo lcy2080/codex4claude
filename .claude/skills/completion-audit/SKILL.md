@@ -1,5 +1,6 @@
 ---
 description: Use before claiming a task is complete. Audits explicit user requirements against actual files, command output, tests, and other concrete evidence.
+effort: xhigh
 ---
 
 # Completion Audit

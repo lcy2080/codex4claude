@@ -14,6 +14,14 @@ Default loop:
 4. Verify using concrete commands or file inspection.
 5. Before claiming completion, audit the user's explicit requirements against actual evidence.
 
+Effort policy:
+
+- Low: short lookup, summarization, handoff.
+- Medium: ordinary bounded implementation.
+- High: review, architecture-sensitive edits, difficult debugging.
+- Xhigh: complex planning and completion audits.
+- Max or ultrathink: only for explicit one-off deep reasoning requests.
+
 Communication:
 
 - Keep progress updates short and factual.
