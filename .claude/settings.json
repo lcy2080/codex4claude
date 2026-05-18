@@ -1,0 +1,37 @@
+{
+  "includeCoAuthoredBy": false,
+  "model": "sonnet",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(rg:*)",
+      "Bash(pwsh -File scripts/verify-harness.ps1)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(npm install:*)",
+      "Bash(pnpm install:*)",
+      "Bash(yarn install:*)",
+      "Bash(rm:*)",
+      "Bash(del:*)",
+      "Bash(Remove-Item:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(./**/credentials.json)",
+      "Bash(curl:*)",
+      "Bash(iwr:*)",
+      "Bash(Invoke-WebRequest:*)"
+    ]
+  },
+  "env": {
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+    "USE_BUILTIN_RIPGREP": "1"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "codex-harness",
+  "description": "Codex-style operating harness for Claude Code with skills, agents, commands, output style, and verification discipline.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Local"
+  },
+  "license": "UNLICENSED"
+}
