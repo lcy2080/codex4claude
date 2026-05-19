@@ -186,6 +186,7 @@ pwsh -File scripts/verify-harness.ps1
 The verifier checks:
 
 - Required file presence.
+- GitHub Actions harness validation workflow presence.
 - JSON parseability.
 - Marketplace name, owner, plugin entry, and relative source path.
 - Markdown frontmatter presence.
@@ -210,6 +211,8 @@ For the GitHub marketplace repository, protect `main` before accepting external 
 - Restrict direct pushes to `main`.
 - Require status checks for `claude plugin validate .`, `claude plugin validate plugins/codex-harness`, and `pwsh -File scripts/verify-harness.ps1`.
 - Require signed commits if that fits your release process.
+
+This repository includes a `Harness Validation` GitHub Actions workflow with a `Harness validation` check that runs those validations on pushes and pull requests targeting `main`.
 
 ## Release Notes
 

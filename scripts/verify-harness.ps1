@@ -5,6 +5,7 @@ $requiredFiles = @(
   "README.md",
   "AGENTS.md",
   "CLAUDE.md",
+  ".github/workflows/harness-validation.yml",
   ".claude-plugin/marketplace.json",
   ".claude/settings.json",
   ".claude/output-styles/codex-harness.md",
@@ -179,6 +180,24 @@ if ($askList -notcontains "Bash(rg:*)") {
 }
 if ($askList -notcontains "Bash(pwsh -File scripts/verify-harness.ps1)") {
   Write-Error "Expected verifier execution to require approval."
+}
+
+$workflowPath = Join-Path $root ".github/workflows/harness-validation.yml"
+$workflowContent = Get-Content -LiteralPath $workflowPath -Raw
+if ($workflowContent -notmatch "name:\s+Harness Validation") {
+  Write-Error "Expected Harness Validation workflow name."
+}
+if ($workflowContent -notmatch "name:\s+Harness validation") {
+  Write-Error "Expected Harness validation job name."
+}
+if ($workflowContent -notmatch "pwsh -File scripts/verify-harness\.ps1") {
+  Write-Error "Expected workflow to run the harness verifier."
+}
+if ($workflowContent -notmatch "claude plugin validate \.") {
+  Write-Error "Expected workflow to validate marketplace manifest."
+}
+if ($workflowContent -notmatch "claude plugin validate plugins/codex-harness") {
+  Write-Error "Expected workflow to validate plugin manifest."
 }
 
 Write-Host "Harness verification passed."

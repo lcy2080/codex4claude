@@ -1,0 +1,41 @@
+name: Harness Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Harness validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Verify harness structure
+        shell: pwsh
+        run: pwsh -File scripts/verify-harness.ps1
+
+      - name: Validate marketplace manifest
+        run: claude plugin validate .
+
+      - name: Validate plugin manifest
+        run: claude plugin validate plugins/codex-harness
