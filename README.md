@@ -134,7 +134,7 @@ Recommended flow:
 
 The optional runner lets this harness use external APIs that expose an Anthropic-compatible endpoint. It is intentionally generic: use your provider's documentation for the exact base URL, credential type, and model names. This applies to MiniMax, Z.ai, and similar providers when they expose an Anthropic-compatible API, but this repository does not hardcode provider profiles.
 
-Claude Code Max/Pro users should leave external provider settings empty. When provider settings are missing or the SDK path fails, the runner falls back to the installed `claude` CLI with `claude -p`, which keeps using the normal Claude Code CLI subscription/auth path instead of calling Claude Code through Agent SDK.
+Claude Code Max/Pro users should leave external provider settings empty. When provider settings are missing or the SDK path fails, the runner falls back to the installed `claude` CLI with `claude -p --agent codex-harness:codex-main`, which keeps using the normal Claude Code CLI subscription/auth path instead of calling Claude Code through Agent SDK.
 
 Install the Node dependency once:
 
@@ -172,6 +172,32 @@ If your provider does not accept Claude model aliases, map the aliases for a sin
 node scripts/run-agent-sdk.mjs --api-key-env PROVIDER_API_KEY --model provider-sonnet --haiku-model provider-small --sonnet-model provider-medium --opus-model provider-large --prompt "Verify this patch"
 ```
 
+For non-interactive runs that need to write files, pass a Claude Agent SDK permission mode explicitly:
+
+```bash
+node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --prompt "Create the requested files"
+```
+
+For production-style or provider compatibility tests, cap both agentic turns and wall-clock time:
+
+```bash
+node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --allowed-tools Read,Write,Edit,Glob,Grep --max-turns 10 --overall-timeout-ms 180000 --prompt "Create the requested files"
+```
+
+Agent SDK option notes:
+
+- `--effort low|medium|high|xhigh|max` maps to the SDK `effort` option for reasoning depth. It is also used for Claude CLI fallback.
+- `--max-turns` limits SDK agentic turns/API round trips, not elapsed time. Use `--overall-timeout-ms` when a wall-clock stop is required.
+- `--overall-timeout-ms` also bounds Claude CLI fallback runs. Fallback streams assistant text and emits progress markers such as `[fallback-init]`, `[fallback-message-start]`, `[fallback-tool-start]`, `[fallback-tool-input]`, `[fallback-tool-result]`, `[fallback-progress]`, and `[fallback-result]`.
+- Agent SDK runs emit the same style of stream summaries with the `sdk-` prefix when `--include-partial-messages` is enabled.
+- Thinking stream events are only marked as `[sdk-thinking]` or `[fallback-thinking]`; hidden reasoning text is not printed.
+- `--allowed-tools` pre-approves listed tools. It is not a strict allow-list when the preset Claude Code toolset is enabled; use `--disallowed-tools` to block known tools.
+- `--max-budget-usd` stops a query if the SDK reports that the cost budget has been exceeded.
+- Claude CLI fallback receives the same permission, tool pre-approval/block, and budget options where the installed `claude` CLI supports them.
+- `--persist-session` keeps SDK session history. Use `--resume <session-id>` or `--continue` for multi-turn follow-up runs in the same project.
+
+These options follow the Claude Agent SDK behavior documented in the official overview and TypeScript SDK reference: https://code.claude.com/docs/en/agent-sdk/overview
+
 The runner only receives the environment variable name, not the credential value. Do not put provider keys in prompts, command history examples, README edits, or plugin manifests.
 
 ## Agent-Specific Provider Routing
@@ -183,12 +209,12 @@ Default routing:
 | Agent | Default mode | Required env vars for external mode |
 | --- | --- | --- |
 | `codex-main` | Claude CLI | None |
-| `context-explorer` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
-| `implementation-worker` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL` |
-| `code-reviewer` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
-| `verification-auditor` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
+| `context-explorer` | External when configured, otherwise main Claude CLI fallback with `haiku`/`low` | `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
+| `implementation-worker` | External when configured, otherwise main Claude CLI fallback with `sonnet`/`medium` | `CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL` |
+| `code-reviewer` | External when configured, otherwise main Claude CLI fallback with `sonnet`/`high` | `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
+| `verification-auditor` | External when configured, otherwise main Claude CLI fallback with `opus`/`max` | `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
 
-For Max/Pro-compatible usage, leave those provider env vars unset. The dry-run output should show `mode` as `claudeCli` and include `fallbackReason`.
+For Max/Pro-compatible usage, leave those provider env vars unset. The dry-run output should show `mode` as `claudeCli`, `fallbackAgent` as `codex-harness:codex-main`, and include `fallbackReason`.
 
 Dry-run a single agent without calling any API:
 
@@ -230,7 +256,7 @@ export CODEX_HARNESS_CODE_REVIEWER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_CODE_REVIEWER_MODEL="provider-c-review"
 ```
 
-Run multiple agents in sequence, allowing each agent to choose its own external provider or Claude CLI fallback:
+Run multiple agents in sequence, allowing each agent to choose its own external provider or main Claude CLI fallback:
 
 ```bash
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --prompt "Implement and review this change"
@@ -242,7 +268,9 @@ Check routing before a real run:
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --dry-run --prompt "probe"
 ```
 
-Each dry-run line is sanitized. It shows the selected `agent`, `mode`, `model`, `effort`, configured env var names, and fallback reason when one applies. It never prints credential values.
+Each dry-run line is sanitized. It shows the selected `agent`, `mode`, `model`, `effort`, main CLI fallback target, configured env var names, and fallback reason when one applies. It never prints credential values.
+
+The fallback prompt is sent back through the main harness agent, not through an external subagent. It includes the requested agent name, the sanitized fallback reason, and the original task so the main Claude Code CLI session can apply the same role and complexity policy. If an Opus fallback run fails because the account needs usage credits for 1M context, the runner retries once with `sonnet` and `high` effort for standard-context compatibility.
 
 ## Agents
 

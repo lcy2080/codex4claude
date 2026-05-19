@@ -132,6 +132,14 @@ if codex_main_provider.get("model") != "sonnet" or codex_main_provider.get("effo
 verification_auditor_provider = provider_config.get("agents", {}).get("verification-auditor", {})
 if verification_auditor_provider.get("model") != "opus" or verification_auditor_provider.get("effort") != "max":
     fail("Expected verification-auditor provider fallback to use opus with max effort.")
+for agent_name, fallback_model in {
+    "context-explorer": "haiku",
+    "implementation-worker": "sonnet",
+    "code-reviewer": "sonnet",
+    "verification-auditor": "opus",
+}.items():
+    if provider_config.get("agents", {}).get(agent_name, {}).get("fallbackModel") != fallback_model:
+        fail(f"Expected {agent_name} provider fallbackModel to be {fallback_model}.")
 
 sdk_runner = read("scripts/run-agent-sdk.mjs")
 for expected in [
@@ -145,7 +153,27 @@ for expected in [
     "--agent-provider-config",
     "--agent-sequence",
     "--dry-run",
+    "--no-fallback",
+    "--permission-mode",
+    "--effort",
+    "--overall-timeout-ms",
+    "--max-budget-usd",
+    "--allowed-tools",
+    "--disallowed-tools",
+    "--max-budget-usd",
+    "--resume",
+    "--continue",
+    "--persist-session",
+    "--output-format",
+    "stream-json",
+    "[fallback-progress]",
+    "-tool-input]",
+    "-message-start]",
+    "handleStreamEvent",
     "Claude CLI fallback",
+    "codex-harness:codex-main",
+    "fallbackAgent",
+    "fallback-retry",
 ]:
     if expected not in sdk_runner:
         fail(f"Expected SDK runner to contain: {expected}")
