@@ -18,8 +18,11 @@ Model and effort policy:
 
 - `haiku` + `low`: context lookup and handoff notes.
 - `sonnet` + `medium`: bounded implementation and default project work.
-- `sonnet`/`opus` + `high`: review and architecture-sensitive debugging.
-- `opus` + `xhigh`: complex planning and verification audits.
-- `max` or `ultrathink`: explicit one-off deep reasoning only.
+- `sonnet` + `high`: default main-thread harness behavior when no external provider is configured.
+- `opus` + `xhigh`: complex planning, review, and verification commands.
+- `opus` + `max`: completion auditor surfaces.
+- `ultrathink`: explicit one-off deep reasoning only after usage credits or a compatible model are selected.
+
+The default `codex-main` agent remains `sonnet` with `high` effort; complex commands intentionally use Opus.
 
 After loading, run `/reload-plugins`, `/help`, and `/agents` to confirm the components are visible.

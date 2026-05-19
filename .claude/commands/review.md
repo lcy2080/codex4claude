@@ -2,7 +2,7 @@
 description: Review changes for bugs, regressions, security, and missing tests
 argument-hint: [scope]
 model: opus
-effort: high
+effort: xhigh
 ---
 
 Review scope: $ARGUMENTS

@@ -126,6 +126,12 @@ for agent_name in ["codex-main", "context-explorer", "implementation-worker", "c
                 fail(f"Invalid env var name in provider config for {agent_name}.")
         if entry.get("credential", {}).get("type") not in {"apiKey", "authToken"}:
             fail(f"Unsupported credential type for {agent_name}.")
+codex_main_provider = provider_config.get("agents", {}).get("codex-main", {})
+if codex_main_provider.get("model") != "sonnet" or codex_main_provider.get("effort") != "high":
+    fail("Expected codex-main provider fallback to use sonnet with high effort.")
+verification_auditor_provider = provider_config.get("agents", {}).get("verification-auditor", {})
+if verification_auditor_provider.get("model") != "opus" or verification_auditor_provider.get("effort") != "max":
+    fail("Expected verification-auditor provider fallback to use opus with max effort.")
 
 sdk_runner = read("scripts/run-agent-sdk.mjs")
 for expected in [
@@ -208,6 +214,10 @@ for path in model_files:
     if not re.search(r"(?m)^model:\s+(haiku|sonnet|opus|inherit)\s*$", read(path)):
         fail(f"Missing or unsupported model assignment: {path}")
 
+codex_main = read("plugins/codex-harness/agents/codex-main.md")
+if not re.search(r"(?m)^model:\s+sonnet\s*$", codex_main) or not re.search(r"(?m)^effort:\s+high\s*$", codex_main):
+    fail("Expected plugin codex-main to use sonnet with high effort for standard context compatibility.")
+
 effort_files = [
     ".claude/agents/context-explorer.md",
     ".claude/agents/implementation-worker.md",
@@ -242,6 +252,43 @@ effort_files = [
 for path in effort_files:
     if not re.search(r"(?m)^effort:\s+(low|medium|high|xhigh|max)\s*$", read(path)):
         fail(f"Missing or unsupported effort assignment: {path}")
+
+opus_files = [
+    ".claude/commands/plan.md",
+    ".claude/commands/review.md",
+    ".claude/commands/verify.md",
+    ".claude/agents/verification-auditor.md",
+    "plugins/codex-harness/commands/plan.md",
+    "plugins/codex-harness/commands/review.md",
+    "plugins/codex-harness/commands/verify.md",
+    "plugins/codex-harness/agents/verification-auditor.md",
+]
+for path in opus_files:
+    if not re.search(r"(?m)^model:\s+opus\s*$", read(path)):
+        fail(f"Expected complex/deep surface to use opus: {path}")
+
+max_effort_files = [
+    ".claude/agents/verification-auditor.md",
+    ".claude/skills/completion-audit/SKILL.md",
+    "plugins/codex-harness/agents/verification-auditor.md",
+    "plugins/codex-harness/skills/completion-audit/SKILL.md",
+]
+for path in max_effort_files:
+    if not re.search(r"(?m)^effort:\s+max\s*$", read(path)):
+        fail(f"Expected opus auditor surface to use max effort: {path}")
+
+xhigh_effort_files = [
+    ".claude/commands/plan.md",
+    ".claude/commands/review.md",
+    ".claude/commands/verify.md",
+    "plugins/codex-harness/commands/plan.md",
+    "plugins/codex-harness/commands/review.md",
+    "plugins/codex-harness/commands/verify.md",
+]
+for path in xhigh_effort_files:
+    if not re.search(r"(?m)^effort:\s+xhigh\s*$", read(path)):
+        fail(f"Expected complex command to use xhigh effort: {path}")
+
 
 settings = json.loads(read(".claude/settings.json"))
 if settings.get("model") != "sonnet":

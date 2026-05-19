@@ -125,7 +125,7 @@ Recommended flow:
 
 - `/codex-harness:plan <task>` or `/plan <task>`: Build a scoped implementation plan. Uses `opus` with `xhigh` effort.
 - `/codex-harness:implement <task>` or `/implement <task>`: Make a focused change and verify it. Uses `sonnet` with `medium` effort.
-- `/codex-harness:review <scope>` or `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `high` effort.
+- `/codex-harness:review <scope>` or `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `xhigh` effort.
 - `/codex-harness:verify <scope>` or `/verify <scope>`: Map explicit requirements to actual evidence. Uses `opus` with `xhigh` effort.
 - `/codex-harness:handoff <scope>` or `/handoff <scope>`: Write a concise continuation note. Uses `haiku` with `low` effort.
 - `/codex-harness:external-agent <task>` or `/external-agent <task>`: Run the harness through Claude Agent SDK against a configured Anthropic-compatible provider. Uses `sonnet` with `medium` effort.
@@ -251,8 +251,8 @@ The harness defines these Claude Code agents:
 - `context-explorer`: Read-only repository exploration for specific questions. Uses `haiku` with `low` effort.
 - `implementation-worker`: Bounded implementation with clear file ownership. Uses `sonnet` with `medium` effort.
 - `code-reviewer`: Bug, regression, security, and test-gap review. Uses `sonnet` with `high` effort.
-- `verification-auditor`: Completion audit against concrete evidence. Uses `opus` with `xhigh` effort.
-- `codex-main`: Plugin main-thread agent for the full harness behavior. Uses `opus` with `high` effort.
+- `verification-auditor`: Completion audit against concrete evidence. Uses `opus` with `max` effort.
+- `codex-main`: Plugin main-thread agent for the full harness behavior. Uses `sonnet` with `high` effort when no external provider is configured.
 
 You can ask Claude to use one explicitly:
 
@@ -275,9 +275,12 @@ The harness assigns model and thinking effort by task complexity:
 
 - `haiku` + `low`: simple lookup, summary, and handoff work.
 - `sonnet` + `medium`: ordinary implementation and bounded worker tasks.
-- `sonnet` or `opus` + `high`: reviews, architecture-sensitive edits, and difficult debugging.
-- `opus` + `xhigh`: complex planning and completion audits.
-- `max` or `ultrathink`: reserved for explicit one-off deep reasoning requests.
+- `sonnet` + `high`: default main-thread harness behavior and difficult bounded implementation when no external provider is configured.
+- `opus` + `xhigh`: complex planning, review, and verification commands.
+- `opus` + `max`: completion auditor surfaces that previously used Opus and now get the highest thinking level.
+- `ultrathink`: reserved for explicit one-off deep reasoning requests after the user has enabled the required Claude Code usage credits or selected a compatible model.
+
+The checked-in `codex-main` default stays on `sonnet` with `high` effort for Claude Code Max/Pro users when no external provider is configured. Complex commands intentionally use Opus; if your account cannot run those settings, switch models manually with `/model`, enable usage credits, or use `/codex-harness:implement` for standard-context implementation work.
 
 Environment override notes:
 

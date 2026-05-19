@@ -119,6 +119,12 @@ foreach ($agentName in $requiredProviderAgents) {
     }
   }
 }
+if ($providerConfig.agents."codex-main".model -ne "sonnet" -or $providerConfig.agents."codex-main".effort -ne "high") {
+  Write-Error "Expected codex-main provider fallback to use sonnet with high effort."
+}
+if ($providerConfig.agents."verification-auditor".model -ne "opus" -or $providerConfig.agents."verification-auditor".effort -ne "max") {
+  Write-Error "Expected verification-auditor provider fallback to use opus with max effort."
+}
 
 $sdkRunnerContent = Get-Content -LiteralPath (Join-Path $root "scripts/run-agent-sdk.mjs") -Raw
 $sdkRunnerExpected = @(
@@ -181,6 +187,11 @@ foreach ($relativePath in $modelFiles) {
   }
 }
 
+$codexMainContent = Get-Content -LiteralPath (Join-Path $root "plugins/codex-harness/agents/codex-main.md") -Raw
+if ($codexMainContent -notmatch "(?m)^model:\s+sonnet\s*$" -or $codexMainContent -notmatch "(?m)^effort:\s+high\s*$") {
+  Write-Error "Expected plugin codex-main to use sonnet with high effort for standard context compatibility."
+}
+
 $effortFiles = @(
   ".claude/agents/context-explorer.md",
   ".claude/agents/implementation-worker.md",
@@ -220,6 +231,52 @@ foreach ($relativePath in $effortFiles) {
     Write-Error "Missing or unsupported effort assignment: $relativePath"
   }
 }
+
+$opusFiles = @(
+  ".claude/commands/plan.md",
+  ".claude/commands/review.md",
+  ".claude/commands/verify.md",
+  ".claude/agents/verification-auditor.md",
+  "plugins/codex-harness/commands/plan.md",
+  "plugins/codex-harness/commands/review.md",
+  "plugins/codex-harness/commands/verify.md",
+  "plugins/codex-harness/agents/verification-auditor.md"
+)
+foreach ($relativePath in $opusFiles) {
+  $content = Get-Content -LiteralPath (Join-Path $root $relativePath) -Raw
+  if ($content -notmatch "(?m)^model:\s+opus\s*$") {
+    Write-Error "Expected complex/deep surface to use opus: $relativePath"
+  }
+}
+
+$maxEffortFiles = @(
+  ".claude/agents/verification-auditor.md",
+  ".claude/skills/completion-audit/SKILL.md",
+  "plugins/codex-harness/agents/verification-auditor.md",
+  "plugins/codex-harness/skills/completion-audit/SKILL.md"
+)
+foreach ($relativePath in $maxEffortFiles) {
+  $content = Get-Content -LiteralPath (Join-Path $root $relativePath) -Raw
+  if ($content -notmatch "(?m)^effort:\s+max\s*$") {
+    Write-Error "Expected opus auditor surface to use max effort: $relativePath"
+  }
+}
+
+$xhighEffortFiles = @(
+  ".claude/commands/plan.md",
+  ".claude/commands/review.md",
+  ".claude/commands/verify.md",
+  "plugins/codex-harness/commands/plan.md",
+  "plugins/codex-harness/commands/review.md",
+  "plugins/codex-harness/commands/verify.md"
+)
+foreach ($relativePath in $xhighEffortFiles) {
+  $content = Get-Content -LiteralPath (Join-Path $root $relativePath) -Raw
+  if ($content -notmatch "(?m)^effort:\s+xhigh\s*$") {
+    Write-Error "Expected complex command to use xhigh effort: $relativePath"
+  }
+}
+
 
 $projectSettings = Get-Content -LiteralPath (Join-Path $root ".claude/settings.json") -Raw | ConvertFrom-Json
 if ($projectSettings.model -ne "sonnet") {
