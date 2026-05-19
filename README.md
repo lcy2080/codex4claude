@@ -125,7 +125,7 @@ Recommended flow:
 
 - `/codex-harness:plan <task>` or `/plan <task>`: Build a scoped implementation plan. Uses `opus` with `xhigh` effort.
 - `/codex-harness:implement <task>` or `/implement <task>`: Make a focused change and verify it. Uses `sonnet` with `medium` effort.
-- `/codex-harness:review <scope>` or `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `high` effort.
+- `/codex-harness:review <scope>` or `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `xhigh` effort.
 - `/codex-harness:verify <scope>` or `/verify <scope>`: Map explicit requirements to actual evidence. Uses `opus` with `xhigh` effort.
 - `/codex-harness:handoff <scope>` or `/handoff <scope>`: Write a concise continuation note. Uses `haiku` with `low` effort.
 - `/codex-harness:external-agent <task>` or `/external-agent <task>`: Run the harness through Claude Agent SDK against a configured Anthropic-compatible provider. Uses `sonnet` with `medium` effort.
@@ -178,13 +178,25 @@ The runner only receives the environment variable name, not the credential value
 
 Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials.
 
+Default routing:
+
+| Agent | Default mode | Required env vars for external mode |
+| --- | --- | --- |
+| `codex-main` | Claude CLI | None |
+| `context-explorer` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
+| `implementation-worker` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL` |
+| `code-reviewer` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
+| `verification-auditor` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
+
+For Max/Pro-compatible usage, leave those provider env vars unset. The dry-run output should show `mode` as `claudeCli` and include `fallbackReason`.
+
 Dry-run a single agent without calling any API:
 
 ```bash
 node scripts/run-agent-sdk.mjs --agent context-explorer --dry-run --prompt "probe"
 ```
 
-Run a specific agent. If all required provider env vars are set, this uses the external Anthropic-compatible provider for that agent. If any required provider env var is empty, it uses Claude CLI fallback:
+Configure one agent on Linux or macOS. If all required provider env vars are set, this uses the external Anthropic-compatible provider for that agent:
 
 ```bash
 export CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL="https://provider.example/anthropic"
@@ -193,13 +205,44 @@ export CODEX_HARNESS_CONTEXT_EXPLORER_MODEL="provider-small"
 node scripts/run-agent-sdk.mjs --agent context-explorer --prompt "Map the files involved"
 ```
 
+Configure one agent on PowerShell:
+
+```powershell
+$env:CODEX_HARNESS_CODE_REVIEWER_BASE_URL = "https://provider.example/anthropic"
+$env:CODEX_HARNESS_CODE_REVIEWER_API_KEY = "set-in-your-shell"
+$env:CODEX_HARNESS_CODE_REVIEWER_MODEL = "provider-review-model"
+node scripts/run-agent-sdk.mjs --agent code-reviewer --prompt "Review the current change"
+```
+
+Configure different providers per agent by setting different env var groups:
+
+```bash
+export CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL="https://provider-a.example/anthropic"
+export CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY="set-in-your-shell"
+export CODEX_HARNESS_CONTEXT_EXPLORER_MODEL="provider-a-small"
+
+export CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL="https://provider-b.example/anthropic"
+export CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY="set-in-your-shell"
+export CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL="provider-b-coder"
+
+export CODEX_HARNESS_CODE_REVIEWER_BASE_URL="https://provider-c.example/anthropic"
+export CODEX_HARNESS_CODE_REVIEWER_API_KEY="set-in-your-shell"
+export CODEX_HARNESS_CODE_REVIEWER_MODEL="provider-c-review"
+```
+
 Run multiple agents in sequence, allowing each agent to choose its own external provider or Claude CLI fallback:
 
 ```bash
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --prompt "Implement and review this change"
 ```
 
-The default manifest routes `codex-main` to Claude CLI and defines external-provider env var names for `context-explorer`, `implementation-worker`, `code-reviewer`, and `verification-auditor`. Leave those env vars unset to use Claude CLI fallback for Max/Pro-compatible usage.
+Check routing before a real run:
+
+```bash
+node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --dry-run --prompt "probe"
+```
+
+Each dry-run line is sanitized. It shows the selected `agent`, `mode`, `model`, `effort`, configured env var names, and fallback reason when one applies. It never prints credential values.
 
 ## Agents
 
@@ -208,8 +251,8 @@ The harness defines these Claude Code agents:
 - `context-explorer`: Read-only repository exploration for specific questions. Uses `haiku` with `low` effort.
 - `implementation-worker`: Bounded implementation with clear file ownership. Uses `sonnet` with `medium` effort.
 - `code-reviewer`: Bug, regression, security, and test-gap review. Uses `sonnet` with `high` effort.
-- `verification-auditor`: Completion audit against concrete evidence. Uses `opus` with `xhigh` effort.
-- `codex-main`: Plugin main-thread agent for the full harness behavior. Uses `opus` with `high` effort.
+- `verification-auditor`: Completion audit against concrete evidence. Uses `opus` with `max` effort.
+- `codex-main`: Plugin main-thread agent for the full harness behavior. Uses `sonnet` with `high` effort when no external provider is configured.
 
 You can ask Claude to use one explicitly:
 
@@ -232,9 +275,12 @@ The harness assigns model and thinking effort by task complexity:
 
 - `haiku` + `low`: simple lookup, summary, and handoff work.
 - `sonnet` + `medium`: ordinary implementation and bounded worker tasks.
-- `sonnet` or `opus` + `high`: reviews, architecture-sensitive edits, and difficult debugging.
-- `opus` + `xhigh`: complex planning and completion audits.
-- `max` or `ultrathink`: reserved for explicit one-off deep reasoning requests.
+- `sonnet` + `high`: default main-thread harness behavior and difficult bounded implementation when no external provider is configured.
+- `opus` + `xhigh`: complex planning, review, and verification commands.
+- `opus` + `max`: completion auditor surfaces that previously used Opus and now get the highest thinking level.
+- `ultrathink`: reserved for explicit one-off deep reasoning requests after the user has enabled the required Claude Code usage credits or selected a compatible model.
+
+The checked-in `codex-main` default stays on `sonnet` with `high` effort for Claude Code Max/Pro users when no external provider is configured. Complex commands intentionally use Opus; if your account cannot run those settings, switch models manually with `/model`, enable usage credits, or use `/codex-harness:implement` for standard-context implementation work.
 
 Environment override notes:
 

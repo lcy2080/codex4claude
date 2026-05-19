@@ -20,7 +20,9 @@ Effort policy:
 - Medium: ordinary bounded implementation.
 - High: review, architecture-sensitive edits, difficult debugging.
 - Xhigh: complex planning and completion audits.
-- Max or ultrathink: only for explicit one-off deep reasoning requests.
+- Opus + xhigh: complex planning, review, and verification commands.
+- Opus + max: completion auditor surfaces.
+- Ultrathink: only for explicit one-off deep reasoning requests.
 
 Communication:
 

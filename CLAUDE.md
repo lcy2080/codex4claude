@@ -18,8 +18,9 @@ Match effort to task complexity:
 - Use low effort for short lookup, summarization, and handoff tasks.
 - Use medium effort for ordinary bounded implementation.
 - Use high effort for review, architecture-sensitive edits, and intelligence-sensitive debugging.
-- Use xhigh effort for planning large changes and completion audits.
-- Reserve max or ultrathink for explicit one-off deep reasoning requests.
+- Use opus with xhigh effort for complex planning, review, and verification commands.
+- Use opus with max effort for completion auditor surfaces.
+- Reserve ultrathink for explicit one-off deep reasoning requests after confirming the account/model can use it without requiring missing usage credits.
 
 ## Collaboration
 

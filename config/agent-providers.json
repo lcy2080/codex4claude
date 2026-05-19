@@ -3,7 +3,7 @@
     "codex-main": {
       "mode": "claudeCli",
       "claudeAgent": "codex-harness:codex-main",
-      "model": "opus",
+      "model": "sonnet",
       "effort": "high"
     },
     "context-explorer": {
@@ -44,7 +44,8 @@
         "env": "CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY"
       },
       "modelEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL",
-      "effort": "xhigh"
+      "model": "opus",
+      "effort": "max"
     }
   }
 }

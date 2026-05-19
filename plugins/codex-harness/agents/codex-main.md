@@ -1,7 +1,7 @@
 ---
 name: codex-main
 description: Main-thread Codex-style agent for scoped implementation, verification, and completion audits.
-model: opus
+model: sonnet
 effort: high
 ---
 
