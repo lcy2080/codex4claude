@@ -125,6 +125,17 @@ if ($providerConfig.agents."codex-main".model -ne "sonnet" -or $providerConfig.a
 if ($providerConfig.agents."verification-auditor".model -ne "opus" -or $providerConfig.agents."verification-auditor".effort -ne "max") {
   Write-Error "Expected verification-auditor provider fallback to use opus with max effort."
 }
+$expectedFallbackModels = @{
+  "context-explorer" = "haiku"
+  "implementation-worker" = "sonnet"
+  "code-reviewer" = "sonnet"
+  "verification-auditor" = "opus"
+}
+foreach ($agentName in $expectedFallbackModels.Keys) {
+  if ($providerConfig.agents.$agentName.fallbackModel -ne $expectedFallbackModels[$agentName]) {
+    Write-Error "Expected $agentName provider fallbackModel to be $($expectedFallbackModels[$agentName])."
+  }
+}
 
 $sdkRunnerContent = Get-Content -LiteralPath (Join-Path $root "scripts/run-agent-sdk.mjs") -Raw
 $sdkRunnerExpected = @(
@@ -138,7 +149,10 @@ $sdkRunnerExpected = @(
   "--agent-provider-config",
   "--agent-sequence",
   "--dry-run",
-  "Claude CLI fallback"
+  "Claude CLI fallback",
+  "codex-harness:codex-main",
+  "fallbackAgent",
+  "fallback-retry"
 )
 foreach ($expected in $sdkRunnerExpected) {
   if ($sdkRunnerContent -notmatch [regex]::Escape($expected)) {

@@ -134,7 +134,7 @@ Recommended flow:
 
 The optional runner lets this harness use external APIs that expose an Anthropic-compatible endpoint. It is intentionally generic: use your provider's documentation for the exact base URL, credential type, and model names. This applies to MiniMax, Z.ai, and similar providers when they expose an Anthropic-compatible API, but this repository does not hardcode provider profiles.
 
-Claude Code Max/Pro users should leave external provider settings empty. When provider settings are missing or the SDK path fails, the runner falls back to the installed `claude` CLI with `claude -p`, which keeps using the normal Claude Code CLI subscription/auth path instead of calling Claude Code through Agent SDK.
+Claude Code Max/Pro users should leave external provider settings empty. When provider settings are missing or the SDK path fails, the runner falls back to the installed `claude` CLI with `claude -p --agent codex-harness:codex-main`, which keeps using the normal Claude Code CLI subscription/auth path instead of calling Claude Code through Agent SDK.
 
 Install the Node dependency once:
 
@@ -183,12 +183,12 @@ Default routing:
 | Agent | Default mode | Required env vars for external mode |
 | --- | --- | --- |
 | `codex-main` | Claude CLI | None |
-| `context-explorer` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
-| `implementation-worker` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL` |
-| `code-reviewer` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
-| `verification-auditor` | External when configured, otherwise Claude CLI fallback | `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
+| `context-explorer` | External when configured, otherwise main Claude CLI fallback with `haiku`/`low` | `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
+| `implementation-worker` | External when configured, otherwise main Claude CLI fallback with `sonnet`/`medium` | `CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL` |
+| `code-reviewer` | External when configured, otherwise main Claude CLI fallback with `sonnet`/`high` | `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
+| `verification-auditor` | External when configured, otherwise main Claude CLI fallback with `opus`/`max` | `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
 
-For Max/Pro-compatible usage, leave those provider env vars unset. The dry-run output should show `mode` as `claudeCli` and include `fallbackReason`.
+For Max/Pro-compatible usage, leave those provider env vars unset. The dry-run output should show `mode` as `claudeCli`, `fallbackAgent` as `codex-harness:codex-main`, and include `fallbackReason`.
 
 Dry-run a single agent without calling any API:
 
@@ -230,7 +230,7 @@ export CODEX_HARNESS_CODE_REVIEWER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_CODE_REVIEWER_MODEL="provider-c-review"
 ```
 
-Run multiple agents in sequence, allowing each agent to choose its own external provider or Claude CLI fallback:
+Run multiple agents in sequence, allowing each agent to choose its own external provider or main Claude CLI fallback:
 
 ```bash
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --prompt "Implement and review this change"
@@ -242,7 +242,9 @@ Check routing before a real run:
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --dry-run --prompt "probe"
 ```
 
-Each dry-run line is sanitized. It shows the selected `agent`, `mode`, `model`, `effort`, configured env var names, and fallback reason when one applies. It never prints credential values.
+Each dry-run line is sanitized. It shows the selected `agent`, `mode`, `model`, `effort`, main CLI fallback target, configured env var names, and fallback reason when one applies. It never prints credential values.
+
+The fallback prompt is sent back through the main harness agent, not through an external subagent. It includes the requested agent name, the sanitized fallback reason, and the original task so the main Claude Code CLI session can apply the same role and complexity policy. If an Opus fallback run fails because the account needs usage credits for 1M context, the runner retries once with `sonnet` and `high` effort for standard-context compatibility.
 
 ## Agents
 
