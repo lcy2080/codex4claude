@@ -8,6 +8,7 @@ required_files='
 README.md
 AGENTS.md
 CLAUDE.md
+package.json
 .github/workflows/harness-validation.yml
 .claude-plugin/marketplace.json
 .claude/settings.json
@@ -17,6 +18,7 @@ CLAUDE.md
 .claude/commands/review.md
 .claude/commands/verify.md
 .claude/commands/handoff.md
+.claude/commands/external-agent.md
 .claude/agents/context-explorer.md
 .claude/agents/implementation-worker.md
 .claude/agents/code-reviewer.md
@@ -38,12 +40,14 @@ plugins/codex-harness/commands/implement.md
 plugins/codex-harness/commands/review.md
 plugins/codex-harness/commands/verify.md
 plugins/codex-harness/commands/handoff.md
+plugins/codex-harness/commands/external-agent.md
 plugins/codex-harness/skills/completion-audit/SKILL.md
 plugins/codex-harness/skills/surgical-editing/SKILL.md
 plugins/codex-harness/skills/context-triage/SKILL.md
 plugins/codex-harness/skills/handoff-note/SKILL.md
 scripts/verify-harness.ps1
 scripts/verify-harness.sh
+scripts/run-agent-sdk.mjs
 '
 
 fail() {
@@ -58,13 +62,13 @@ for relative_path in $required_files; do
 done
 
 python_cmd=
-if command -v python3 >/dev/null 2>&1; then
-  python_cmd=python3
-elif command -v python >/dev/null 2>&1; then
-  python_cmd=python
-else
-  fail "Python 3 is required for JSON validation."
-fi
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import json, pathlib, re, sys' >/dev/null 2>&1; then
+    python_cmd=$candidate
+    break
+  fi
+done
+[ -n "$python_cmd" ] || fail "Python 3 is required for JSON validation."
 
 "$python_cmd" - "$root" <<'PY'
 import json
@@ -82,6 +86,7 @@ def fail(message):
 
 json_files = [
     ".claude-plugin/marketplace.json",
+    "package.json",
     ".claude/settings.json",
     "plugins/codex-harness/.claude-plugin/plugin.json",
     "plugins/codex-harness/settings.json",
@@ -102,6 +107,23 @@ if plugin.get("source") != "./plugins/codex-harness":
 if not (root / "plugins/codex-harness").is_dir():
     fail("Marketplace codex-harness source directory is missing.")
 
+package = json.loads(read("package.json"))
+if "@anthropic-ai/claude-agent-sdk" not in package.get("dependencies", {}):
+    fail("Expected package.json to depend on @anthropic-ai/claude-agent-sdk.")
+
+sdk_runner = read("scripts/run-agent-sdk.mjs")
+for expected in [
+    "@anthropic-ai/claude-agent-sdk",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CODEX_HARNESS_BASE_URL",
+    "plugins/codex-harness",
+    "Use exactly one credential mode",
+]:
+    if expected not in sdk_runner:
+        fail(f"Expected SDK runner to contain: {expected}")
+
 frontmatter_files = [
     ".claude/output-styles/codex-harness.md",
     ".claude/commands/plan.md",
@@ -109,6 +131,7 @@ frontmatter_files = [
     ".claude/commands/review.md",
     ".claude/commands/verify.md",
     ".claude/commands/handoff.md",
+    ".claude/commands/external-agent.md",
     ".claude/agents/context-explorer.md",
     ".claude/agents/implementation-worker.md",
     ".claude/agents/code-reviewer.md",
@@ -128,6 +151,7 @@ frontmatter_files = [
     "plugins/codex-harness/commands/review.md",
     "plugins/codex-harness/commands/verify.md",
     "plugins/codex-harness/commands/handoff.md",
+    "plugins/codex-harness/commands/external-agent.md",
     "plugins/codex-harness/skills/completion-audit/SKILL.md",
     "plugins/codex-harness/skills/surgical-editing/SKILL.md",
     "plugins/codex-harness/skills/context-triage/SKILL.md",
@@ -147,6 +171,7 @@ model_files = [
     ".claude/commands/review.md",
     ".claude/commands/verify.md",
     ".claude/commands/handoff.md",
+    ".claude/commands/external-agent.md",
     "plugins/codex-harness/agents/codex-main.md",
     "plugins/codex-harness/agents/context-explorer.md",
     "plugins/codex-harness/agents/implementation-worker.md",
@@ -157,6 +182,7 @@ model_files = [
     "plugins/codex-harness/commands/review.md",
     "plugins/codex-harness/commands/verify.md",
     "plugins/codex-harness/commands/handoff.md",
+    "plugins/codex-harness/commands/external-agent.md",
 ]
 for path in model_files:
     if not re.search(r"(?m)^model:\s+(haiku|sonnet|opus|inherit)\s*$", read(path)):
@@ -172,6 +198,7 @@ effort_files = [
     ".claude/commands/review.md",
     ".claude/commands/verify.md",
     ".claude/commands/handoff.md",
+    ".claude/commands/external-agent.md",
     ".claude/skills/completion-audit/SKILL.md",
     ".claude/skills/surgical-editing/SKILL.md",
     ".claude/skills/context-triage/SKILL.md",
@@ -186,6 +213,7 @@ effort_files = [
     "plugins/codex-harness/commands/review.md",
     "plugins/codex-harness/commands/verify.md",
     "plugins/codex-harness/commands/handoff.md",
+    "plugins/codex-harness/commands/external-agent.md",
     "plugins/codex-harness/skills/completion-audit/SKILL.md",
     "plugins/codex-harness/skills/surgical-editing/SKILL.md",
     "plugins/codex-harness/skills/context-triage/SKILL.md",
@@ -217,11 +245,41 @@ for expected in [
     "name: Harness validation",
     "sh scripts/verify-harness.sh",
     "pwsh -File scripts/verify-harness.ps1",
+    "npm install",
+    "node scripts/run-agent-sdk.mjs --help",
     "claude plugin validate .",
     "claude plugin validate plugins/codex-harness",
 ]:
     if expected not in workflow:
         fail(f"Expected workflow to contain: {expected}")
+
+secret_patterns = [
+    re.compile(r"sk-[A-Za-z0-9_-]{12,}"),
+    re.compile(r"your_real_api_key"),
+    re.compile(r"paste_your_api_key"),
+]
+for scan_root in [
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "package.json",
+    ".github",
+    ".claude-plugin",
+    ".claude",
+    "plugins/codex-harness",
+    "scripts",
+]:
+    candidate = root / scan_root
+    paths = [candidate] if candidate.is_file() else candidate.rglob("*")
+    for path in paths:
+        if not path.is_file() or not re.search(r"\.(md|mjs|json|yml|yaml|ps1|sh)$", path.name):
+            continue
+        if path.name in {"verify-harness.ps1", "verify-harness.sh"}:
+            continue
+        content = path.read_text(encoding="utf-8")
+        for pattern in secret_patterns:
+            if pattern.search(content):
+                fail(f"Potential hardcoded secret example in {path.relative_to(root)} matching {pattern.pattern}")
 PY
 
 printf 'Harness verification passed.\n'

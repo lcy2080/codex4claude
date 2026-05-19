@@ -40,6 +40,7 @@ The plugin components are namespaced as `codex-harness`. Plugin slash commands a
 /codex-harness:review <scope>
 /codex-harness:verify <completion criteria>
 /codex-harness:handoff <current state>
+/codex-harness:external-agent <provider-backed task>
 /codex-harness:completion-audit
 ```
 
@@ -109,6 +110,7 @@ If you are running this repository directly as a project-local `.claude` configu
 /review <scope>
 /verify <completion criteria>
 /handoff <current state>
+/external-agent <provider-backed task>
 ```
 
 Recommended flow:
@@ -126,6 +128,49 @@ Recommended flow:
 - `/codex-harness:review <scope>` or `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `high` effort.
 - `/codex-harness:verify <scope>` or `/verify <scope>`: Map explicit requirements to actual evidence. Uses `opus` with `xhigh` effort.
 - `/codex-harness:handoff <scope>` or `/handoff <scope>`: Write a concise continuation note. Uses `haiku` with `low` effort.
+- `/codex-harness:external-agent <task>` or `/external-agent <task>`: Run the harness through Claude Agent SDK against a configured Anthropic-compatible provider. Uses `sonnet` with `medium` effort.
+
+## Run With Anthropic-Compatible Providers
+
+The optional SDK runner lets this harness use external APIs that expose an Anthropic-compatible endpoint. It is intentionally generic: use your provider's documentation for the exact base URL, credential type, and model names. This applies to MiniMax, Z.ai, and similar providers when they expose an Anthropic-compatible API, but this repository does not hardcode provider profiles.
+
+Install the Node dependency once:
+
+```bash
+npm install
+```
+
+API-key mode on Linux and macOS:
+
+```bash
+export CODEX_HARNESS_BASE_URL="https://provider.example/anthropic"
+export PROVIDER_API_KEY="set-in-your-shell"
+node scripts/run-agent-sdk.mjs --api-key-env PROVIDER_API_KEY --model provider-model --prompt "Plan a small change"
+```
+
+Bearer-token mode on Linux and macOS:
+
+```bash
+export CODEX_HARNESS_BASE_URL="https://provider.example/api/anthropic"
+export PROVIDER_TOKEN="set-in-your-shell"
+node scripts/run-agent-sdk.mjs --auth-token-env PROVIDER_TOKEN --model provider-model --prompt "Review recent changes"
+```
+
+PowerShell API-key mode:
+
+```powershell
+$env:CODEX_HARNESS_BASE_URL = "https://provider.example/anthropic"
+$env:PROVIDER_API_KEY = "set-in-your-shell"
+node scripts/run-agent-sdk.mjs --api-key-env PROVIDER_API_KEY --model provider-model --prompt "Plan a small change"
+```
+
+If your provider does not accept Claude model aliases, map the aliases for a single run:
+
+```bash
+node scripts/run-agent-sdk.mjs --api-key-env PROVIDER_API_KEY --model provider-sonnet --haiku-model provider-small --sonnet-model provider-medium --opus-model provider-large --prompt "Verify this patch"
+```
+
+The runner only receives the environment variable name, not the credential value. Do not put provider keys in prompts, command history examples, README edits, or plugin manifests.
 
 ## Agents
 
@@ -174,7 +219,10 @@ Environment override notes:
 - `.claude`: Project-local Claude Code configuration.
 - `CLAUDE.md`: Project memory for local use.
 - `AGENTS.md`: Editing instructions for agents working on this repository.
+- `package.json`: Node dependency and npm script entry points for the optional SDK runner.
+- `scripts/run-agent-sdk.mjs`: Generic Claude Agent SDK runner for Anthropic-compatible providers.
 - `scripts/verify-harness.ps1`: Structural verifier for the harness.
+- `scripts/verify-harness.sh`: POSIX shell verifier for Linux and macOS.
 
 ## Verify The Harness
 
@@ -195,23 +243,27 @@ The verifier checks:
 - Required file presence.
 - GitHub Actions harness validation workflow presence.
 - POSIX shell and PowerShell verifier coverage.
+- Optional Claude Agent SDK runner and npm dependency coverage.
 - JSON parseability.
 - Marketplace name, owner, plugin entry, and relative source path.
 - Markdown frontmatter presence.
 - Model assignments for commands and agents.
 - Effort assignments for commands, agents, and skills.
 - Project default model and effort settings.
+- Obvious hardcoded secret examples in harness docs and scripts.
 
 Expected success output:
 
 ```text
 Harness verification passed.
-Checked 39 required files.
+Checked 43 required files.
 ```
 
 ## Security Notes
 
 When using the project-local `.claude` configuration, shell searches and workspace verifier execution are approval-gated. This avoids bypassing file-read deny rules with shell output and avoids automatically executing a verifier script that may have been modified in the workspace.
+
+For external providers, keep credentials outside the repository and pass only the credential environment variable name to the SDK runner. The verifier rejects common secret-looking examples, but it is not a substitute for secret scanning before publishing.
 
 For the GitHub marketplace repository, protect `main` before accepting external contributions. Recommended rules:
 

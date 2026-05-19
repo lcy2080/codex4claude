@@ -27,8 +27,19 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install npm dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate SDK runner help
+        run: node scripts/run-agent-sdk.mjs --help
 
       - name: Verify harness structure with POSIX shell
         run: sh scripts/verify-harness.sh
