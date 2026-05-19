@@ -41,6 +41,11 @@ jobs:
       - name: Validate SDK runner help
         run: node scripts/run-agent-sdk.mjs --help
 
+      - name: Validate SDK runner provider routing dry-run
+        run: |
+          node scripts/run-agent-sdk.mjs --agent context-explorer --dry-run --prompt "probe"
+          node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,code-reviewer --dry-run --prompt "probe"
+
       - name: Verify harness structure with POSIX shell
         run: sh scripts/verify-harness.sh
 
