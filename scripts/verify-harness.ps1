@@ -5,6 +5,7 @@ $requiredFiles = @(
   "README.md",
   "AGENTS.md",
   "CLAUDE.md",
+  ".claude-plugin/marketplace.json",
   ".claude/settings.json",
   ".claude/output-styles/codex-harness.md",
   ".claude/commands/plan.md",
@@ -52,6 +53,7 @@ if ($missing.Count -gt 0) {
 }
 
 $jsonFiles = @(
+  ".claude-plugin/marketplace.json",
   ".claude/settings.json",
   "plugins/codex-harness/.claude-plugin/plugin.json",
   "plugins/codex-harness/settings.json"
@@ -60,6 +62,24 @@ $jsonFiles = @(
 foreach ($relativePath in $jsonFiles) {
   $path = Join-Path $root $relativePath
   Get-Content -LiteralPath $path -Raw | ConvertFrom-Json | Out-Null
+}
+
+$marketplace = Get-Content -LiteralPath (Join-Path $root ".claude-plugin/marketplace.json") -Raw | ConvertFrom-Json
+if ($marketplace.name -ne "codex4claude") {
+  Write-Error "Expected marketplace name to be codex4claude."
+}
+if (-not $marketplace.owner -or $marketplace.owner.name -ne "lcy2080") {
+  Write-Error "Expected marketplace owner name to be lcy2080."
+}
+$marketplacePlugin = $marketplace.plugins | Where-Object { $_.name -eq "codex-harness" } | Select-Object -First 1
+if (-not $marketplacePlugin) {
+  Write-Error "Expected marketplace to include codex-harness plugin."
+}
+if ($marketplacePlugin.source -ne "./plugins/codex-harness") {
+  Write-Error "Expected codex-harness source to be ./plugins/codex-harness."
+}
+if (-not (Test-Path -LiteralPath (Join-Path $root "plugins/codex-harness") -PathType Container)) {
+  Write-Error "Marketplace codex-harness source directory is missing."
 }
 
 $frontmatterFiles = $requiredFiles | Where-Object { $_ -like "*.md" -and $_ -ne "README.md" -and $_ -ne "AGENTS.md" -and $_ -ne "CLAUDE.md" -and $_ -ne "plugins/codex-harness/README.md" }
