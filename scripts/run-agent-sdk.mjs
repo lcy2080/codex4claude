@@ -27,6 +27,7 @@ Provider routing:
   --agent-provider-config <path>  Agent provider manifest. Defaults to config/agent-providers.json.
   --agent-sequence <a,b,c>        Run agents sequentially, selecting provider or Claude CLI per agent.
   --dry-run                      Print sanitized routing decisions without SDK/API/Claude CLI execution.
+  --no-fallback                  Fail instead of falling back to Claude CLI.
 
 External provider options:
   --base-url <url>                Anthropic-compatible endpoint URL.
@@ -34,14 +35,24 @@ External provider options:
   --auth-token-env <ENV_NAME>     Environment variable containing a bearer token.
   --model <name>                  SDK or Claude CLI session model. Defaults to "sonnet".
   --agent <name>                  Main-thread agent. Defaults to "codex-main".
-  --effort <level>                Sets CLAUDE_CODE_EFFORT_LEVEL or passes --effort to Claude CLI.
+  --effort <level>                SDK reasoning effort, and Claude CLI fallback effort.
   --fallback-model <name>         Claude CLI fallback model alias when no agent policy overrides it.
   --fallback-effort <level>       Claude CLI fallback effort when no agent policy overrides it.
   --haiku-model <name>            Maps the haiku alias for this run.
   --sonnet-model <name>           Maps the sonnet alias for this run.
   --opus-model <name>             Maps the opus alias for this run.
   --timeout-ms <number>           Sets API_TIMEOUT_MS for compatible providers.
+  --overall-timeout-ms <number>   Aborts the SDK query after this many milliseconds.
   --max-turns <number>            Maximum SDK agentic turns.
+  --max-budget-usd <number>       Maximum SDK cost before stopping.
+  --permission-mode <mode>        SDK permission mode. Defaults to "default".
+  --allowed-tools <a,b,c>         Auto-approved SDK tool names.
+  --disallowed-tools <a,b,c>      Blocked SDK tool names.
+  --include-partial-messages      Emit SDK partial streaming messages when available.
+  --persist-session               Persist SDK session history for later resume/continue.
+  --resume <session-id>           Resume an SDK session by ID.
+  --resume-session-at <message-id> Resume an SDK session up to a message UUID.
+  --continue                      Continue the latest SDK session in the current directory.
   --cwd <path>                    Working directory. Defaults to current directory.
   --plugin-path <path>            Plugin path. Defaults to plugins/codex-harness.
   --help                         Show this help.
@@ -64,6 +75,16 @@ Environment fallbacks:
   CODEX_HARNESS_FALLBACK_MODEL
   CODEX_HARNESS_FALLBACK_EFFORT
   CODEX_HARNESS_TIMEOUT_MS
+  CODEX_HARNESS_OVERALL_TIMEOUT_MS
+  CODEX_HARNESS_MAX_BUDGET_USD
+  CODEX_HARNESS_ALLOWED_TOOLS
+  CODEX_HARNESS_DISALLOWED_TOOLS
+  CODEX_HARNESS_INCLUDE_PARTIAL_MESSAGES
+  CODEX_HARNESS_PERSIST_SESSION
+  CODEX_HARNESS_RESUME
+  CODEX_HARNESS_RESUME_SESSION_AT
+  CODEX_HARNESS_CONTINUE
+  CODEX_HARNESS_PERMISSION_MODE
   CODEX_HARNESS_PROMPT
 `;
 
@@ -80,7 +101,14 @@ function parseArgs(argv) {
       continue;
     }
     const key = current.slice(2);
-    if (key === "help" || key === "dry-run") {
+    if (
+      key === "help" ||
+      key === "dry-run" ||
+      key === "include-partial-messages" ||
+      key === "persist-session" ||
+      key === "continue" ||
+      key === "no-fallback"
+    ) {
       args[key] = true;
       continue;
     }
@@ -102,6 +130,18 @@ function setIfPresent(env, key, value) {
   if (value !== undefined && value !== "") {
     env[key] = value;
   }
+}
+
+function parseCsv(value) {
+  if (!value) {
+    return undefined;
+  }
+  const items = value.split(",").map((item) => item.trim()).filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
+function truthy(value) {
+  return value === true || value === "1" || value === "true";
 }
 
 function assertEnvName(name, fieldName) {
@@ -350,33 +390,67 @@ async function runSdk(agent, prompt, provider, options) {
     throw new Error(`SDK import failed: ${error.message}`);
   }
 
+  const abortController = options.overallTimeoutMs ? new AbortController() : undefined;
+  const timeout = abortController
+    ? setTimeout(() => abortController.abort(), options.overallTimeoutMs)
+    : undefined;
+  const allowedTools = parseCsv(getOption(options.args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS"));
+  const disallowedTools = parseCsv(getOption(options.args, "disallowed-tools", "CODEX_HARNESS_DISALLOWED_TOOLS"));
+  const includePartialMessages = truthy(options.args["include-partial-messages"]) || truthy(process.env.CODEX_HARNESS_INCLUDE_PARTIAL_MESSAGES);
+  const resume = getOption(options.args, "resume", "CODEX_HARNESS_RESUME");
+  const resumeSessionAt = getOption(options.args, "resume-session-at", "CODEX_HARNESS_RESUME_SESSION_AT");
+  const continueSession = truthy(options.args.continue) || truthy(process.env.CODEX_HARNESS_CONTINUE);
+  const persistSession = truthy(options.args["persist-session"]) || truthy(process.env.CODEX_HARNESS_PERSIST_SESSION) || Boolean(resume || continueSession);
+  if (resume && continueSession) {
+    throw new Error("--resume and --continue are mutually exclusive.");
+  }
+
   const query = sdk.query({
     prompt,
     options: {
+      abortController,
+      allowedTools,
+      disallowedTools,
       cwd: options.cwd,
       env: buildSdkEnv(provider, options.args),
       model: provider.model,
+      effort: provider.effort ?? getOption(options.args, "effort", "CODEX_HARNESS_EFFORT"),
       agent,
       maxTurns: options.maxTurns,
+      maxBudgetUsd: options.maxBudgetUsd,
+      includePartialMessages,
+      resume,
+      resumeSessionAt,
+      continue: continueSession,
       plugins: [{ type: "local", path: options.pluginPath }],
       settingSources: ["project"],
       systemPrompt: { type: "preset", preset: "claude_code" },
       tools: { type: "preset", preset: "claude_code" },
-      permissionMode: "default",
-      persistSession: false
+      permissionMode: getOption(options.args, "permission-mode", "CODEX_HARNESS_PERMISSION_MODE", "default"),
+      persistSession
     }
   });
 
   let output = "";
-  for await (const message of query) {
-    if (message.type === "system" && message.subtype === "init") {
-      process.stderr.write(`[init] mode=external agent=${agent} model=${message.model} cwd=${message.cwd}\n`);
-    } else if (message.type === "assistant") {
-      output += printAssistantText(message);
-    } else if (message.type === "result" && message.subtype !== "success") {
-      throw new Error(`SDK result failed: ${message.subtype}`);
-    } else if (message.type === "result") {
-      process.stderr.write(`[result] success turns=${message.num_turns}\n`);
+  try {
+    for await (const message of query) {
+      if (message.type === "system" && message.subtype === "init") {
+        process.stderr.write(`[init] mode=external agent=${agent} model=${message.model} cwd=${message.cwd}\n`);
+      } else if (message.type === "assistant") {
+        output += printAssistantText(message);
+      } else if (message.type === "user") {
+        process.stderr.write("[tool_result]\n");
+      } else if (message.type === "result" && message.subtype !== "success") {
+        throw new Error(`SDK result failed: ${message.subtype}`);
+      } else if (message.type === "result") {
+        process.stderr.write(`[result] success turns=${message.num_turns} cost=${message.total_cost_usd ?? "unknown"} session=${message.session_id ?? "unknown"}\n`);
+      } else if (message.type === "stream_event") {
+        process.stderr.write("[stream_event]\n");
+      }
+    }
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
     }
   }
   return output.trim();
@@ -391,7 +465,7 @@ function spawnClaudeCli(cliArgs, options) {
     const child = spawn("claude", cliArgs, {
       cwd: options.cwd,
       env: process.env,
-      shell: process.platform === "win32",
+      shell: false,
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -457,11 +531,17 @@ async function runAgent(agent, prompt, provider, options) {
     return "";
   }
   if (provider.mode !== "external") {
+    if (options.args["no-fallback"]) {
+      throw new Error(`Agent ${agent} did not select an external provider: ${provider.fallbackReason ?? "provider not selected"}`);
+    }
     return runClaudeCli(agent, prompt, provider, options, provider.fallbackReason ?? "provider not selected");
   }
   try {
     return await runSdk(agent, prompt, provider, options);
   } catch (error) {
+    if (options.args["no-fallback"]) {
+      throw error;
+    }
     return runClaudeCli(agent, prompt, provider, options, error.message);
   }
 }
@@ -497,6 +577,17 @@ async function main() {
   if (args["max-turns"] && (!Number.isInteger(maxTurns) || maxTurns < 1)) {
     throw new Error("--max-turns must be a positive integer.");
   }
+  const overallTimeoutMs = getOption(args, "overall-timeout-ms", "CODEX_HARNESS_OVERALL_TIMEOUT_MS")
+    ? Number.parseInt(getOption(args, "overall-timeout-ms", "CODEX_HARNESS_OVERALL_TIMEOUT_MS"), 10)
+    : undefined;
+  if (overallTimeoutMs !== undefined && (!Number.isInteger(overallTimeoutMs) || overallTimeoutMs < 1)) {
+    throw new Error("--overall-timeout-ms must be a positive integer.");
+  }
+  const maxBudgetUsdRaw = getOption(args, "max-budget-usd", "CODEX_HARNESS_MAX_BUDGET_USD");
+  const maxBudgetUsd = maxBudgetUsdRaw ? Number.parseFloat(maxBudgetUsdRaw) : undefined;
+  if (maxBudgetUsdRaw && (!Number.isFinite(maxBudgetUsd) || maxBudgetUsd <= 0)) {
+    throw new Error("--max-budget-usd must be a positive number.");
+  }
 
   const config = readJsonIfPresent(resolveConfigPath(args));
   const sequence = getOption(args, "agent-sequence", "CODEX_HARNESS_AGENT_SEQUENCE");
@@ -507,7 +598,7 @@ async function main() {
     throw new Error("--agent-sequence must include at least one agent.");
   }
 
-  const options = { args, cwd, pluginPath, maxTurns };
+  const options = { args, cwd, pluginPath, maxTurns, maxBudgetUsd, overallTimeoutMs };
   const outputs = [];
   for (const agent of agents) {
     const provider = resolveProvider(agent, args, config);

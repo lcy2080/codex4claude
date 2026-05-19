@@ -172,6 +172,28 @@ If your provider does not accept Claude model aliases, map the aliases for a sin
 node scripts/run-agent-sdk.mjs --api-key-env PROVIDER_API_KEY --model provider-sonnet --haiku-model provider-small --sonnet-model provider-medium --opus-model provider-large --prompt "Verify this patch"
 ```
 
+For non-interactive runs that need to write files, pass a Claude Agent SDK permission mode explicitly:
+
+```bash
+node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --prompt "Create the requested files"
+```
+
+For production-style or provider compatibility tests, cap both agentic turns and wall-clock time:
+
+```bash
+node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --allowed-tools Read,Write,Edit,Glob,Grep --max-turns 10 --overall-timeout-ms 180000 --prompt "Create the requested files"
+```
+
+Agent SDK option notes:
+
+- `--effort low|medium|high|xhigh|max` maps to the SDK `effort` option for reasoning depth. It is also used for Claude CLI fallback.
+- `--max-turns` limits SDK agentic turns/API round trips, not elapsed time. Use `--overall-timeout-ms` when a wall-clock stop is required.
+- `--allowed-tools` pre-approves listed tools. It is not a strict allow-list when the preset Claude Code toolset is enabled; use `--disallowed-tools` to block known tools.
+- `--max-budget-usd` stops a query if the SDK reports that the cost budget has been exceeded.
+- `--persist-session` keeps SDK session history. Use `--resume <session-id>` or `--continue` for multi-turn follow-up runs in the same project.
+
+These options follow the Claude Agent SDK behavior documented in the official overview and TypeScript SDK reference: https://code.claude.com/docs/en/agent-sdk/overview
+
 The runner only receives the environment variable name, not the credential value. Do not put provider keys in prompts, command history examples, README edits, or plugin manifests.
 
 ## Agent-Specific Provider Routing
