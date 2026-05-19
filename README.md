@@ -188,8 +188,12 @@ Agent SDK option notes:
 
 - `--effort low|medium|high|xhigh|max` maps to the SDK `effort` option for reasoning depth. It is also used for Claude CLI fallback.
 - `--max-turns` limits SDK agentic turns/API round trips, not elapsed time. Use `--overall-timeout-ms` when a wall-clock stop is required.
+- `--overall-timeout-ms` also bounds Claude CLI fallback runs. Fallback streams assistant text and emits progress markers such as `[fallback-init]`, `[fallback-message-start]`, `[fallback-tool-start]`, `[fallback-tool-input]`, `[fallback-tool-result]`, `[fallback-progress]`, and `[fallback-result]`.
+- Agent SDK runs emit the same style of stream summaries with the `sdk-` prefix when `--include-partial-messages` is enabled.
+- Thinking stream events are only marked as `[sdk-thinking]` or `[fallback-thinking]`; hidden reasoning text is not printed.
 - `--allowed-tools` pre-approves listed tools. It is not a strict allow-list when the preset Claude Code toolset is enabled; use `--disallowed-tools` to block known tools.
 - `--max-budget-usd` stops a query if the SDK reports that the cost budget has been exceeded.
+- Claude CLI fallback receives the same permission, tool pre-approval/block, and budget options where the installed `claude` CLI supports them.
 - `--persist-session` keeps SDK session history. Use `--resume <session-id>` or `--continue` for multi-turn follow-up runs in the same project.
 
 These options follow the Claude Agent SDK behavior documented in the official overview and TypeScript SDK reference: https://code.claude.com/docs/en/agent-sdk/overview
