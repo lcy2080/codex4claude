@@ -200,6 +200,17 @@ Harness verification passed.
 Checked 36 required files.
 ```
 
+## Security Notes
+
+When using the project-local `.claude` configuration, shell searches and workspace verifier execution are approval-gated. This avoids bypassing file-read deny rules with shell output and avoids automatically executing a verifier script that may have been modified in the workspace.
+
+For the GitHub marketplace repository, protect `main` before accepting external contributions. Recommended rules:
+
+- Require pull requests before merging.
+- Restrict direct pushes to `main`.
+- Require status checks for `claude plugin validate .`, `claude plugin validate plugins/codex-harness`, and `pwsh -File scripts/verify-harness.ps1`.
+- Require signed commits if that fits your release process.
+
 ## Release Notes
 
 The plugin currently uses an explicit `version` in both the marketplace entry and plugin manifest. Claude Code uses that version as part of update resolution, so bump the plugin version when publishing changes that installed users should receive.

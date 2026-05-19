@@ -166,6 +166,20 @@ if ($projectSettings.model -ne "sonnet") {
 if ($projectSettings.effortLevel -ne "medium") {
   Write-Error "Expected .claude/settings.json effortLevel to be medium."
 }
+$allowList = @($projectSettings.permissions.allow)
+$askList = @($projectSettings.permissions.ask)
+if ($allowList -contains "Bash(rg:*)") {
+  Write-Error "Bash(rg:*) must not be auto-allowed because it can bypass file-read deny rules."
+}
+if ($allowList -contains "Bash(pwsh -File scripts/verify-harness.ps1)") {
+  Write-Error "Workspace verifier execution must not be auto-allowed."
+}
+if ($askList -notcontains "Bash(rg:*)") {
+  Write-Error "Expected Bash(rg:*) to require approval."
+}
+if ($askList -notcontains "Bash(pwsh -File scripts/verify-harness.ps1)") {
+  Write-Error "Expected verifier execution to require approval."
+}
 
 Write-Host "Harness verification passed."
 Write-Host "Checked $($requiredFiles.Count) required files."
