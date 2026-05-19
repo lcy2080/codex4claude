@@ -128,11 +128,11 @@ Recommended flow:
 - `/codex-harness:review <scope>` or `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `xhigh` effort.
 - `/codex-harness:verify <scope>` or `/verify <scope>`: Map explicit requirements to actual evidence. Uses `opus` with `xhigh` effort.
 - `/codex-harness:handoff <scope>` or `/handoff <scope>`: Write a concise continuation note. Uses `haiku` with `low` effort.
-- `/codex-harness:external-agent <task>` or `/external-agent <task>`: Run the harness through Claude Agent SDK against a configured Anthropic-compatible provider. Uses `sonnet` with `medium` effort.
+- `/codex-harness:external-agent <task>` or `/external-agent <task>`: Run the harness through the configured external SDK backend, or Claude CLI fallback. Uses `sonnet` with `medium` effort.
 
-## Run With Anthropic-Compatible Providers
+## Run With Multi-SDK External Providers
 
-The optional runner lets this harness use external APIs that expose an Anthropic-compatible endpoint. It is intentionally generic: use your provider's documentation for the exact base URL, credential type, and model names. This applies to MiniMax, Z.ai, and similar providers when they expose an Anthropic-compatible API, but this repository does not hardcode provider profiles.
+The optional runner lets this harness use external APIs through either the Claude Agent SDK (`sdk: "anthropic"`) or OpenAI Agents SDK (`sdk: "openai"`). It is intentionally generic: use your provider's documentation for the exact base URL, credential type, SDK protocol, and model names. OpenAI mode uses the OpenAI Agents SDK with Chat Completions-compatible transport by default for broader provider compatibility.
 
 Claude Code Max/Pro users should leave external provider settings empty. When provider settings are missing or the SDK path fails, the runner falls back to the installed `claude` CLI with `claude -p --agent codex-harness:codex-main`, which keeps using the normal Claude Code CLI subscription/auth path instead of calling Claude Code through Agent SDK.
 
@@ -142,12 +142,24 @@ Install the Node dependency once:
 npm install
 ```
 
-API-key mode on Linux and macOS:
+Use `.env.local.example` as a key-free template for local provider settings. Keep real provider URLs and credentials in your shell or ignored `.env.local` files only.
+
+Anthropic-compatible API-key mode on Linux and macOS:
 
 ```bash
 export CODEX_HARNESS_BASE_URL="https://provider.example/anthropic"
+export CODEX_HARNESS_SDK="anthropic"
 export PROVIDER_API_KEY="set-in-your-shell"
-node scripts/run-agent-sdk.mjs --api-key-env PROVIDER_API_KEY --model provider-model --prompt "Plan a small change"
+node scripts/run-agent-sdk.mjs --sdk anthropic --api-key-env PROVIDER_API_KEY --model provider-model --prompt "Plan a small change"
+```
+
+OpenAI-compatible API-key mode on Linux and macOS:
+
+```bash
+export CODEX_HARNESS_BASE_URL="https://provider.example/v1"
+export CODEX_HARNESS_SDK="openai"
+export OPENAI_COMPAT_API_KEY="set-in-your-shell"
+node scripts/run-agent-sdk.mjs --sdk openai --api-key-env OPENAI_COMPAT_API_KEY --model provider-model --prompt "Map the files involved"
 ```
 
 Bearer-token mode on Linux and macOS:
@@ -190,29 +202,33 @@ Agent SDK option notes:
 - `--max-turns` limits SDK agentic turns/API round trips, not elapsed time. Use `--overall-timeout-ms` when a wall-clock stop is required.
 - `--overall-timeout-ms` also bounds Claude CLI fallback runs. Fallback streams assistant text and emits progress markers such as `[fallback-init]`, `[fallback-message-start]`, `[fallback-tool-start]`, `[fallback-tool-input]`, `[fallback-tool-result]`, `[fallback-progress]`, and `[fallback-result]`.
 - Agent SDK runs emit the same style of stream summaries with the `sdk-` prefix when `--include-partial-messages` is enabled.
+- OpenAI Agents SDK runs emit `[openai-init]`, `[openai-tool-start]`, `[openai-tool-result]`, `[openai-progress]`, and `[openai-result]`.
+- OpenAI mode exposes `Read`, `LS`, `Glob`, and `Grep` by default. `Edit`, `MultiEdit`, and `Write` require `--permission-mode acceptEdits` or a manifest `allowWrite: true`. `Bash` requires `--allowed-tools Bash` or manifest `allowBash: true`, and still runs through timeout, cwd, output-cap, and destructive-command checks.
+- Read-only review runs that inspect multiple files can need more turns than small probes. Use `--max-turns 12` to `--max-turns 20` for provider smoke tests that require `LS`, `Glob`, `Read`, and final synthesis.
 - Thinking stream events are only marked as `[sdk-thinking]` or `[fallback-thinking]`; hidden reasoning text is not printed.
 - `--allowed-tools` pre-approves listed tools. It is not a strict allow-list when the preset Claude Code toolset is enabled; use `--disallowed-tools` to block known tools.
 - `--max-budget-usd` stops a query if the SDK reports that the cost budget has been exceeded.
 - Claude CLI fallback receives the same permission, tool pre-approval/block, and budget options where the installed `claude` CLI supports them.
-- `--persist-session` keeps SDK session history. Use `--resume <session-id>` or `--continue` for multi-turn follow-up runs in the same project.
+- `--persist-session` keeps SDK session history. In OpenAI mode, history is stored under `.codex-harness/openai-sessions/` inside the selected workspace and `[openai-result]` reports the session id. Use `--resume <session-id>` or `--continue` for multi-turn follow-up runs in the same project.
+- OpenAI tracing is opt-in with `CODEX_HARNESS_OPENAI_TRACING=1`; trace export is configured with `traceIncludeSensitiveData: false` so tool inputs, prompts, and secrets are not intentionally exported.
 
-These options follow the Claude Agent SDK behavior documented in the official overview and TypeScript SDK reference: https://code.claude.com/docs/en/agent-sdk/overview
+Claude SDK options follow the Claude Agent SDK behavior documented in the official overview and TypeScript SDK reference: https://code.claude.com/docs/en/agent-sdk/overview
 
 The runner only receives the environment variable name, not the credential value. Do not put provider keys in prompts, command history examples, README edits, or plugin manifests.
 
 ## Agent-Specific Provider Routing
 
-Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials.
+Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials. Each entry can set `sdk` to `anthropic` or `openai`, and should also name an optional `sdkEnv` so `.env` files can declare the protocol next to the base URL/model/key. SDK selection priority is `--sdk`, then agent-specific `sdkEnv`, then `CODEX_HARNESS_SDK`, then manifest `sdk`, then `anthropic`.
 
 Default routing:
 
-| Agent | Default mode | Required env vars for external mode |
+| Agent | Default SDK/mode | Required env vars for external mode |
 | --- | --- | --- |
-| `codex-main` | Claude CLI | None |
-| `context-explorer` | External when configured, otherwise main Claude CLI fallback with `haiku`/`low` | `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
-| `implementation-worker` | External when configured, otherwise main Claude CLI fallback with `sonnet`/`medium` | `CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL` |
-| `code-reviewer` | External when configured, otherwise main Claude CLI fallback with `sonnet`/`high` | `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
-| `verification-auditor` | External when configured, otherwise main Claude CLI fallback with `opus`/`max` | `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
+| `codex-main` | Anthropic / Claude CLI | None |
+| `context-explorer` | Anthropic / external when configured, otherwise main Claude CLI fallback with `haiku`/`low` | `CODEX_HARNESS_CONTEXT_EXPLORER_SDK`, `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
+| `implementation-worker` | Anthropic / external when configured, otherwise main Claude CLI fallback with `sonnet`/`medium` | `CODEX_HARNESS_IMPLEMENTATION_WORKER_SDK`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL` |
+| `code-reviewer` | Anthropic / external when configured, otherwise main Claude CLI fallback with `sonnet`/`high` | `CODEX_HARNESS_CODE_REVIEWER_SDK`, `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
+| `verification-auditor` | Anthropic / external when configured, otherwise main Claude CLI fallback with `opus`/`max` | `CODEX_HARNESS_VERIFICATION_AUDITOR_SDK`, `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
 
 For Max/Pro-compatible usage, leave those provider env vars unset. The dry-run output should show `mode` as `claudeCli`, `fallbackAgent` as `codex-harness:codex-main`, and include `fallbackReason`.
 
@@ -226,6 +242,7 @@ Configure one agent on Linux or macOS. If all required provider env vars are set
 
 ```bash
 export CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL="https://provider.example/anthropic"
+export CODEX_HARNESS_CONTEXT_EXPLORER_SDK="anthropic"
 export CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_CONTEXT_EXPLORER_MODEL="provider-small"
 node scripts/run-agent-sdk.mjs --agent context-explorer --prompt "Map the files involved"
@@ -235,23 +252,51 @@ Configure one agent on PowerShell:
 
 ```powershell
 $env:CODEX_HARNESS_CODE_REVIEWER_BASE_URL = "https://provider.example/anthropic"
+$env:CODEX_HARNESS_CODE_REVIEWER_SDK = "anthropic"
 $env:CODEX_HARNESS_CODE_REVIEWER_API_KEY = "set-in-your-shell"
 $env:CODEX_HARNESS_CODE_REVIEWER_MODEL = "provider-review-model"
 node scripts/run-agent-sdk.mjs --agent code-reviewer --prompt "Review the current change"
+```
+
+Select the OpenAI SDK backend for a one-off OpenAI-compatible provider run:
+
+```bash
+export CODEX_HARNESS_BASE_URL="https://provider.example/v1"
+export CODEX_HARNESS_SDK="openai"
+export OPENAI_COMPAT_API_KEY="set-in-your-shell"
+node scripts/run-agent-sdk.mjs --sdk openai --api-key-env OPENAI_COMPAT_API_KEY --model provider-coder --agent context-explorer --prompt "Map the files involved"
+```
+
+Or configure it per agent in `config/agent-providers.json`:
+
+```json
+{
+  "sdk": "openai",
+  "sdkEnv": "OPENAI_COMPAT_SDK",
+  "mode": "external",
+  "baseUrlEnv": "OPENAI_COMPAT_BASE_URL",
+  "credential": { "type": "apiKey", "env": "OPENAI_COMPAT_API_KEY" },
+  "modelEnv": "OPENAI_COMPAT_CODER_MODEL",
+  "fallbackModel": "sonnet",
+  "effort": "medium"
+}
 ```
 
 Configure different providers per agent by setting different env var groups:
 
 ```bash
 export CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL="https://provider-a.example/anthropic"
+export CODEX_HARNESS_CONTEXT_EXPLORER_SDK="anthropic"
 export CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_CONTEXT_EXPLORER_MODEL="provider-a-small"
 
 export CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL="https://provider-b.example/anthropic"
+export CODEX_HARNESS_IMPLEMENTATION_WORKER_SDK="anthropic"
 export CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL="provider-b-coder"
 
 export CODEX_HARNESS_CODE_REVIEWER_BASE_URL="https://provider-c.example/anthropic"
+export CODEX_HARNESS_CODE_REVIEWER_SDK="anthropic"
 export CODEX_HARNESS_CODE_REVIEWER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_CODE_REVIEWER_MODEL="provider-c-review"
 ```
@@ -262,13 +307,15 @@ Run multiple agents in sequence, allowing each agent to choose its own external 
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --prompt "Implement and review this change"
 ```
 
+Real sequence runs emit `[sequence-start]` and `[sequence-result]` around each agent. The agent's own backend still emits its normal `[openai-*]`, `[sdk-*]`, or `[fallback-*]` markers inside that step.
+
 Check routing before a real run:
 
 ```bash
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --dry-run --prompt "probe"
 ```
 
-Each dry-run line is sanitized. It shows the selected `agent`, `mode`, `model`, `effort`, main CLI fallback target, configured env var names, and fallback reason when one applies. It never prints credential values.
+Each dry-run line is sanitized. It shows the selected `agent`, `sdk`, `mode`, `model`, `effort`, main CLI fallback target, configured env var names including `sdkEnv`, OpenAI write/Bash tool exposure, and fallback reason when one applies. It never prints credential values.
 
 The fallback prompt is sent back through the main harness agent, not through an external subagent. It includes the requested agent name, the sanitized fallback reason, and the original task so the main Claude Code CLI session can apply the same role and complexity policy. If an Opus fallback run fails because the account needs usage credits for 1M context, the runner retries once with `sonnet` and `high` effort for standard-context compatibility.
 
@@ -324,7 +371,7 @@ Environment override notes:
 - `AGENTS.md`: Editing instructions for agents working on this repository.
 - `package.json`: Node dependency and npm script entry points for the optional SDK runner.
 - `config/agent-providers.json`: Env-only agent provider routing manifest.
-- `scripts/run-agent-sdk.mjs`: Generic Claude Agent SDK runner for Anthropic-compatible providers.
+- `scripts/run-agent-sdk.mjs`: Generic multi-SDK runner for Anthropic-compatible and OpenAI-compatible providers.
 - `scripts/verify-harness.ps1`: Structural verifier for the harness.
 - `scripts/verify-harness.sh`: POSIX shell verifier for Linux and macOS.
 
@@ -361,7 +408,7 @@ Expected success output:
 
 ```text
 Harness verification passed.
-Checked 44 required files.
+Checked 45 required files.
 ```
 
 ## Security Notes

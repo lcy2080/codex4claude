@@ -5,6 +5,7 @@ $requiredFiles = @(
   "README.md",
   "AGENTS.md",
   "CLAUDE.md",
+  ".env.local.example",
   "package.json",
   "config/agent-providers.json",
   ".github/workflows/harness-validation.yml",
@@ -96,6 +97,11 @@ $package = Get-Content -LiteralPath (Join-Path $root "package.json") -Raw | Conv
 if (-not $package.dependencies -or -not $package.dependencies.PSObject.Properties.Name.Contains("@anthropic-ai/claude-agent-sdk")) {
   Write-Error "Expected package.json to depend on @anthropic-ai/claude-agent-sdk."
 }
+foreach ($dependencyName in @("@openai/agents", "openai", "zod")) {
+  if (-not $package.dependencies.PSObject.Properties.Name.Contains($dependencyName)) {
+    Write-Error "Expected package.json to depend on $dependencyName."
+  }
+}
 
 $providerConfig = Get-Content -LiteralPath (Join-Path $root "config/agent-providers.json") -Raw | ConvertFrom-Json
 $requiredProviderAgents = @("codex-main", "context-explorer", "implementation-worker", "code-reviewer", "verification-auditor")
@@ -107,8 +113,14 @@ foreach ($agentName in $requiredProviderAgents) {
   if ($entry.mode -notin @("external", "claudeCli")) {
     Write-Error "Unsupported provider mode for $agentName."
   }
+  if ($entry.sdk -and $entry.sdk -notin @("anthropic", "openai")) {
+    Write-Error "Unsupported provider sdk for $agentName."
+  }
+  if ($entry.sdkEnv -and $entry.sdkEnv -notmatch "^[A-Za-z_][A-Za-z0-9_]*$") {
+    Write-Error "Invalid sdkEnv in provider config for $agentName."
+  }
   if ($entry.mode -eq "external") {
-    $envFields = @($entry.baseUrlEnv, $entry.credential.env, $entry.modelEnv) | Where-Object { $_ }
+    $envFields = @($entry.sdkEnv, $entry.baseUrlEnv, $entry.credential.env, $entry.modelEnv) | Where-Object { $_ }
     foreach ($envName in $envFields) {
       if ($envName -notmatch "^[A-Za-z_][A-Za-z0-9_]*$") {
         Write-Error "Invalid env var name in provider config for $agentName."
@@ -140,14 +152,20 @@ foreach ($agentName in $expectedFallbackModels.Keys) {
 $sdkRunnerContent = Get-Content -LiteralPath (Join-Path $root "scripts/run-agent-sdk.mjs") -Raw
 $sdkRunnerExpected = @(
   "@anthropic-ai/claude-agent-sdk",
+  "@openai/agents",
+  "OpenAIProvider",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
   "CODEX_HARNESS_BASE_URL",
+  "CODEX_HARNESS_SDK",
+  "CODEX_HARNESS_CODE_REVIEWER_SDK",
+  "sdkEnv",
   "CODEX_HARNESS_AGENT_PROVIDER_CONFIG",
   "plugins/codex-harness",
   "--agent-provider-config",
   "--agent-sequence",
+  "--sdk",
   "--dry-run",
   "--no-fallback",
   "--permission-mode",
@@ -163,6 +181,18 @@ $sdkRunnerExpected = @(
   "--output-format",
   "stream-json",
   "[fallback-progress]",
+  "[openai-init]",
+  "[openai-tool-",
+  "[openai-progress]",
+  "[openai-result]",
+  "[sequence-start]",
+  "[sequence-result]",
+  "MemorySession",
+  "OPENAI_SESSION_DIR",
+  "traceIncludeSensitiveData: false",
+  "Read",
+  "MultiEdit",
+  "runOpenAiSdk",
   "-tool-input]",
   "-message-start]",
   "handleStreamEvent",
