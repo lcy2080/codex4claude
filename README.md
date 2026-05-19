@@ -32,9 +32,14 @@ Confirm the installation:
 /help
 ```
 
-The plugin components are namespaced as `codex-harness`. For example:
+The plugin components are namespaced as `codex-harness`. Plugin slash commands and skills use this form:
 
 ```text
+/codex-harness:plan <task>
+/codex-harness:implement <task>
+/codex-harness:review <scope>
+/codex-harness:verify <completion criteria>
+/codex-harness:handoff <current state>
 /codex-harness:completion-audit
 ```
 
@@ -85,7 +90,17 @@ Choose `Codex Harness` under `Output style`, then restart Claude Code. Output st
 
 ## Daily Workflow
 
-Use these slash commands for typical coding work:
+Use these slash commands for typical coding work. If you installed the harness as a plugin, use the namespaced command form:
+
+```text
+/codex-harness:plan <task>
+/codex-harness:implement <task>
+/codex-harness:review <scope>
+/codex-harness:verify <completion criteria>
+/codex-harness:handoff <current state>
+```
+
+If you are running this repository directly as a project-local `.claude` configuration, the same commands are also available without the namespace:
 
 ```text
 /plan <task>
@@ -105,11 +120,11 @@ Recommended flow:
 
 ## Slash Commands
 
-- `/plan <task>`: Build a scoped implementation plan. Uses `opus` with `xhigh` effort.
-- `/implement <task>`: Make a focused change and verify it. Uses `sonnet` with `medium` effort.
-- `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `high` effort.
-- `/verify <scope>`: Map explicit requirements to actual evidence. Uses `opus` with `xhigh` effort.
-- `/handoff <scope>`: Write a concise continuation note. Uses `haiku` with `low` effort.
+- `/codex-harness:plan <task>` or `/plan <task>`: Build a scoped implementation plan. Uses `opus` with `xhigh` effort.
+- `/codex-harness:implement <task>` or `/implement <task>`: Make a focused change and verify it. Uses `sonnet` with `medium` effort.
+- `/codex-harness:review <scope>` or `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `high` effort.
+- `/codex-harness:verify <scope>` or `/verify <scope>`: Map explicit requirements to actual evidence. Uses `opus` with `xhigh` effort.
+- `/codex-harness:handoff <scope>` or `/handoff <scope>`: Write a concise continuation note. Uses `haiku` with `low` effort.
 
 ## Agents
 
