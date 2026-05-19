@@ -1,12 +1,16 @@
 {
   "agents": {
     "codex-main": {
+      "sdk": "anthropic",
+      "sdkEnv": "CODEX_HARNESS_CODEX_MAIN_SDK",
       "mode": "claudeCli",
       "claudeAgent": "codex-harness:codex-main",
       "model": "sonnet",
       "effort": "high"
     },
     "context-explorer": {
+      "sdk": "anthropic",
+      "sdkEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_SDK",
       "mode": "external",
       "baseUrlEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL",
       "credential": {
@@ -18,6 +22,8 @@
       "effort": "low"
     },
     "implementation-worker": {
+      "sdk": "anthropic",
+      "sdkEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_SDK",
       "mode": "external",
       "baseUrlEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL",
       "credential": {
@@ -29,6 +35,8 @@
       "effort": "medium"
     },
     "code-reviewer": {
+      "sdk": "anthropic",
+      "sdkEnv": "CODEX_HARNESS_CODE_REVIEWER_SDK",
       "mode": "external",
       "baseUrlEnv": "CODEX_HARNESS_CODE_REVIEWER_BASE_URL",
       "credential": {
@@ -40,6 +48,8 @@
       "effort": "high"
     },
     "verification-auditor": {
+      "sdk": "anthropic",
+      "sdkEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_SDK",
       "mode": "external",
       "baseUrlEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL",
       "credential": {

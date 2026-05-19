@@ -8,6 +8,7 @@ required_files='
 README.md
 AGENTS.md
 CLAUDE.md
+.env.local.example
 package.json
 config/agent-providers.json
 .github/workflows/harness-validation.yml
@@ -112,6 +113,9 @@ if not (root / "plugins/codex-harness").is_dir():
 package = json.loads(read("package.json"))
 if "@anthropic-ai/claude-agent-sdk" not in package.get("dependencies", {}):
     fail("Expected package.json to depend on @anthropic-ai/claude-agent-sdk.")
+for dependency_name in ["@openai/agents", "openai", "zod"]:
+    if dependency_name not in package.get("dependencies", {}):
+        fail(f"Expected package.json to depend on {dependency_name}.")
 
 provider_config = json.loads(read("config/agent-providers.json"))
 for agent_name in ["codex-main", "context-explorer", "implementation-worker", "code-reviewer", "verification-auditor"]:
@@ -120,8 +124,12 @@ for agent_name in ["codex-main", "context-explorer", "implementation-worker", "c
         fail(f"Expected provider config entry for {agent_name}.")
     if entry.get("mode") not in {"external", "claudeCli"}:
         fail(f"Unsupported provider mode for {agent_name}.")
+    if entry.get("sdk") and entry.get("sdk") not in {"anthropic", "openai"}:
+        fail(f"Unsupported provider sdk for {agent_name}.")
+    if entry.get("sdkEnv") and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", entry.get("sdkEnv")):
+        fail(f"Invalid sdkEnv in provider config for {agent_name}.")
     if entry.get("mode") == "external":
-        for env_name in [entry.get("baseUrlEnv"), entry.get("credential", {}).get("env"), entry.get("modelEnv")]:
+        for env_name in [entry.get("sdkEnv"), entry.get("baseUrlEnv"), entry.get("credential", {}).get("env"), entry.get("modelEnv")]:
             if env_name and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", env_name):
                 fail(f"Invalid env var name in provider config for {agent_name}.")
         if entry.get("credential", {}).get("type") not in {"apiKey", "authToken"}:
@@ -144,14 +152,20 @@ for agent_name, fallback_model in {
 sdk_runner = read("scripts/run-agent-sdk.mjs")
 for expected in [
     "@anthropic-ai/claude-agent-sdk",
+    "@openai/agents",
+    "OpenAIProvider",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "CODEX_HARNESS_BASE_URL",
+    "CODEX_HARNESS_SDK",
+    "CODEX_HARNESS_CODE_REVIEWER_SDK",
+    "sdkEnv",
     "CODEX_HARNESS_AGENT_PROVIDER_CONFIG",
     "plugins/codex-harness",
     "--agent-provider-config",
     "--agent-sequence",
+    "--sdk",
     "--dry-run",
     "--no-fallback",
     "--permission-mode",
@@ -167,6 +181,18 @@ for expected in [
     "--output-format",
     "stream-json",
     "[fallback-progress]",
+    "[openai-init]",
+    "[openai-tool-",
+    "[openai-progress]",
+    "[openai-result]",
+    "[sequence-start]",
+    "[sequence-result]",
+    "MemorySession",
+    "OPENAI_SESSION_DIR",
+    "traceIncludeSensitiveData: false",
+    "Read",
+    "MultiEdit",
+    "runOpenAiSdk",
     "-tool-input]",
     "-message-start]",
     "handleStreamEvent",

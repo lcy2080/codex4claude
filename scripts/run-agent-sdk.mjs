@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,6 +10,10 @@ import process from "node:process";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_PROVIDER_CONFIG = "config/agent-providers.json";
 const DEFAULT_FALLBACK_AGENT = "codex-harness:codex-main";
+const DEFAULT_SDK = "anthropic";
+const OPENAI_SESSION_DIR = ".codex-harness/openai-sessions";
+const MAX_TOOL_BYTES = 1024 * 1024;
+const MAX_TOOL_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_AGENT_FALLBACKS = {
   "codex-main": { model: "sonnet", effort: "high" },
   "context-explorer": { model: "haiku", effort: "low" },
@@ -26,11 +31,12 @@ const HELP = `Usage:
 Provider routing:
   --agent-provider-config <path>  Agent provider manifest. Defaults to config/agent-providers.json.
   --agent-sequence <a,b,c>        Run agents sequentially, selecting provider or Claude CLI per agent.
+  --sdk <openai|anthropic>        External provider SDK. Overrides sdkEnv and manifest sdk.
   --dry-run                      Print sanitized routing decisions without SDK/API/Claude CLI execution.
   --no-fallback                  Fail instead of falling back to Claude CLI.
 
 External provider options:
-  --base-url <url>                Anthropic-compatible endpoint URL.
+  --base-url <url>                Provider endpoint URL.
   --api-key-env <ENV_NAME>        Environment variable containing an API key.
   --auth-token-env <ENV_NAME>     Environment variable containing a bearer token.
   --model <name>                  SDK or Claude CLI session model. Defaults to "sonnet".
@@ -65,6 +71,8 @@ Claude CLI fallback:
   This preserves Claude Code Max/Pro subscription usage without calling Claude Code through Agent SDK.
 
 Environment fallbacks:
+  CODEX_HARNESS_SDK
+  Agent manifests can also name per-agent sdkEnv values such as CODEX_HARNESS_CODE_REVIEWER_SDK.
   CODEX_HARNESS_AGENT_PROVIDER_CONFIG
   CODEX_HARNESS_BASE_URL
   CODEX_HARNESS_API_KEY_ENV
@@ -160,6 +168,19 @@ function assertMode(mode, agent) {
   }
 }
 
+function assertSdk(sdk, agent) {
+  if (sdk !== "anthropic" && sdk !== "openai") {
+    throw new Error(`Agent ${agent} has unsupported sdk: ${sdk}`);
+  }
+}
+
+function sdkForEntry(agent, entry = {}, args = {}) {
+  assertEnvName(entry.sdkEnv, `${agent}.sdkEnv`);
+  const sdk = args.sdk ?? envValueFromName(entry.sdkEnv) ?? process.env.CODEX_HARNESS_SDK ?? entry.sdk ?? DEFAULT_SDK;
+  assertSdk(sdk, agent);
+  return sdk;
+}
+
 function fallbackPolicyForAgent(agent, entry = {}, args = {}) {
   const defaults = DEFAULT_AGENT_FALLBACKS[agent] ?? DEFAULT_AGENT_FALLBACKS["codex-main"];
   return {
@@ -193,22 +214,26 @@ function envValueFromName(envName) {
   return envName ? process.env[envName] : undefined;
 }
 
-function providerFromManifest(agent, config) {
+function providerFromManifest(agent, config, args = {}) {
   const agents = config?.agents ?? {};
   const entry = agents[agent];
   if (!entry) {
+    const sdk = sdkForEntry(agent, {}, args);
     return {
       mode: "claudeCli",
+      sdk,
       fallbackReason: "no agent provider entry",
       fallback: fallbackPolicyForAgent(agent)
     };
   }
   const mode = entry.mode ?? "claudeCli";
   assertMode(mode, agent);
+  const sdk = sdkForEntry(agent, entry, args);
   const fallback = fallbackPolicyForAgent(agent, entry);
   if (mode === "claudeCli") {
     return {
       mode,
+      sdk,
       model: fallback.model,
       effort: fallback.effort,
       fallback,
@@ -219,6 +244,7 @@ function providerFromManifest(agent, config) {
 
   const credential = entry.credential ?? {};
   assertEnvName(entry.baseUrlEnv, `${agent}.baseUrlEnv`);
+  assertEnvName(entry.sdkEnv, `${agent}.sdkEnv`);
   assertEnvName(credential.env, `${agent}.credential.env`);
   assertEnvName(entry.modelEnv, `${agent}.modelEnv`);
   assertEnvName(entry.haikuModelEnv, `${agent}.haikuModelEnv`);
@@ -234,6 +260,7 @@ function providerFromManifest(agent, config) {
   if (!baseUrl || !credentialValue || !model) {
     return {
       mode: "claudeCli",
+      sdk,
       fallbackReason: "external provider env is incomplete",
       model: fallback.model,
       effort: fallback.effort,
@@ -243,6 +270,7 @@ function providerFromManifest(agent, config) {
   }
   return {
     mode,
+    sdk,
     baseUrl,
     credentialType: credential.type,
     credentialEnv: credential.env,
@@ -259,6 +287,8 @@ function providerFromManifest(agent, config) {
 }
 
 function providerFromExplicitArgs(args, agent) {
+  const sdk = getOption(args, "sdk", "CODEX_HARNESS_SDK", DEFAULT_SDK);
+  assertSdk(sdk, agent);
   const baseUrl = getOption(args, "base-url", "CODEX_HARNESS_BASE_URL");
   const apiKeyEnv = getOption(args, "api-key-env", "CODEX_HARNESS_API_KEY_ENV");
   const authTokenEnv = getOption(args, "auth-token-env", "CODEX_HARNESS_AUTH_TOKEN_ENV");
@@ -277,6 +307,7 @@ function providerFromExplicitArgs(args, agent) {
   if (!baseUrl || !credentialEnv || !credentialValue) {
     return {
       mode: "claudeCli",
+      sdk,
       model: fallback.model,
       effort: fallback.effort,
       fallback,
@@ -285,6 +316,7 @@ function providerFromExplicitArgs(args, agent) {
   }
   return {
     mode: "external",
+    sdk,
     baseUrl,
     credentialType: apiKeyEnv ? "apiKey" : "authToken",
     credentialEnv,
@@ -301,22 +333,31 @@ function providerFromExplicitArgs(args, agent) {
 
 function resolveProvider(agent, args, config) {
   const explicit = providerFromExplicitArgs(args, agent);
-  return explicit ?? providerFromManifest(agent, config);
+  return explicit ?? providerFromManifest(agent, config, args);
 }
 
 function printRouting(agent, provider, args) {
   const fallback = provider.fallback ?? fallbackPolicyForAgent(agent, provider.entry, args);
+  const resume = getOption(args, "resume", "CODEX_HARNESS_RESUME");
+  const continueSession = truthy(args.continue) || truthy(process.env.CODEX_HARNESS_CONTINUE);
   const payload = {
     agent,
     mode: provider.mode,
+    sdk: provider.sdk ?? DEFAULT_SDK,
     model: provider.model ?? getOption(args, "model", "CODEX_HARNESS_MODEL", "sonnet"),
     effort: provider.effort ?? getOption(args, "effort", "CODEX_HARNESS_EFFORT", "medium"),
     fallbackAgent: fallback.agent,
     fallbackModel: fallback.model,
     fallbackEffort: fallback.effort,
+    sdkEnv: provider.entry?.sdkEnv,
     baseUrlEnv: provider.entry?.baseUrlEnv,
     credentialType: provider.credentialType ?? provider.entry?.credential?.type,
     credentialEnv: provider.credentialEnv ?? provider.entry?.credential?.env,
+    writeTools: canExposeWriteTools(provider, args),
+    bashTool: canExposeBashTool(provider, args),
+    persistSession: shouldPersistOpenAiSession(args),
+    resume,
+    continue: continueSession,
     fallbackReason: provider.fallbackReason,
     fallbackEligible: true
   };
@@ -360,6 +401,317 @@ function buildSdkEnv(provider, args) {
   setIfPresent(env, "API_TIMEOUT_MS", provider.timeoutMs ?? getOption(args, "timeout-ms", "CODEX_HARNESS_TIMEOUT_MS"));
   env.CLAUDE_AGENT_SDK_CLIENT_APP = "codex4claude";
   return env;
+}
+
+function openAiAllowedSet(args) {
+  return new Set(parseCsv(getOption(args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS")) ?? []);
+}
+
+function canExposeWriteTools(provider, args) {
+  const permissionMode = getOption(args, "permission-mode", "CODEX_HARNESS_PERMISSION_MODE", "default");
+  return permissionMode === "acceptEdits" || permissionMode === "bypassPermissions" || provider.entry?.allowWrite === true;
+}
+
+function canExposeBashTool(provider, args) {
+  const allowed = openAiAllowedSet(args);
+  return allowed.has("Bash") || allowed.has("bash") || provider.entry?.allowBash === true;
+}
+
+function isDisallowedTool(name, args) {
+  const disallowed = new Set(parseCsv(getOption(args, "disallowed-tools", "CODEX_HARNESS_DISALLOWED_TOOLS")) ?? []);
+  return disallowed.has(name) || disallowed.has(name.toLowerCase());
+}
+
+async function realpathIfPresent(targetPath) {
+  try {
+    return await fs.promises.realpath(targetPath);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return targetPath;
+    }
+    throw error;
+  }
+}
+
+async function assertInsideWorkspace(targetPath, workspaceRoot, allowMissing = false) {
+  const resolved = path.resolve(workspaceRoot, targetPath);
+  const realWorkspace = await fs.promises.realpath(workspaceRoot);
+  const existing = allowMissing ? await realpathIfPresent(path.dirname(resolved)) : await fs.promises.realpath(resolved);
+  const relative = path.relative(realWorkspace, existing);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Path is outside the workspace root.");
+  }
+  return resolved;
+}
+
+async function assertReadableTextFile(filePath) {
+  const stat = await fs.promises.lstat(filePath);
+  if (stat.isSymbolicLink()) {
+    throw new Error("Symlink reads are refused.");
+  }
+  if (!stat.isFile()) {
+    throw new Error("Path is not a file.");
+  }
+  if (stat.size > MAX_TOOL_BYTES) {
+    throw new Error(`File is too large for tool access (${stat.size} bytes).`);
+  }
+  const buffer = await fs.promises.readFile(filePath);
+  if (buffer.includes(0)) {
+    throw new Error("Binary file reads are refused.");
+  }
+  return buffer.toString("utf8");
+}
+
+function truncateToolOutput(text) {
+  const buffer = Buffer.from(String(text), "utf8");
+  if (buffer.length <= MAX_TOOL_OUTPUT_BYTES) {
+    return String(text);
+  }
+  return `${buffer.subarray(0, MAX_TOOL_OUTPUT_BYTES).toString("utf8")}\n[truncated ${buffer.length - MAX_TOOL_OUTPUT_BYTES} bytes]`;
+}
+
+function globToRegExp(pattern) {
+  const normalized = pattern.replace(/\\/g, "/");
+  let out = "^";
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    const next = normalized[index + 1];
+    if (char === "*" && next === "*") {
+      out += ".*";
+      index += 1;
+    } else if (char === "*") {
+      out += "[^/]*";
+    } else if (char === "?") {
+      out += "[^/]";
+    } else {
+      out += char.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+    }
+  }
+  out += "$";
+  return new RegExp(out);
+}
+
+async function walkFiles(startPath, workspaceRoot, results = []) {
+  const entries = await fs.promises.readdir(startPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(startPath, entry.name);
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name === ".git") {
+        continue;
+      }
+      await walkFiles(fullPath, workspaceRoot, results);
+    } else if (entry.isFile()) {
+      results.push(path.relative(workspaceRoot, fullPath).replace(/\\/g, "/"));
+    }
+    if (results.length >= 5000) {
+      break;
+    }
+  }
+  return results;
+}
+
+function logOpenAiTool(kind, name, detail = "") {
+  process.stderr.write(`[openai-tool-${kind}] ${name}${detail ? ` ${detail}` : ""}\n`);
+}
+
+async function createOpenAiTools(options, provider) {
+  const [{ tool }, { z }] = await Promise.all([import("@openai/agents"), import("zod")]);
+  const workspaceRoot = await fs.promises.realpath(options.cwd);
+  const tools = [];
+  const addTool = (name, description, parameters, execute) => {
+    if (isDisallowedTool(name, options.args)) {
+      return;
+    }
+    tools.push(tool({
+      name,
+      description,
+      parameters,
+      strict: true,
+      async execute(input) {
+        logOpenAiTool("start", name);
+        const result = await execute(input);
+        logOpenAiTool("result", name);
+        return truncateToolOutput(result);
+      }
+    }));
+  };
+
+  addTool("Read", "Read a UTF-8 text file inside the workspace root.", z.object({
+    file_path: z.string(),
+    offset: z.number().int().min(1).optional(),
+    limit: z.number().int().min(1).max(2000).optional()
+  }), async ({ file_path: filePath, offset, limit }) => {
+    const resolved = await assertInsideWorkspace(filePath, workspaceRoot);
+    const content = await assertReadableTextFile(resolved);
+    const lines = content.split(/\r?\n/);
+    const start = offset ? offset - 1 : 0;
+    const selected = lines.slice(start, limit ? start + limit : undefined);
+    return selected.map((line, index) => `${start + index + 1}: ${line}`).join("\n");
+  });
+
+  addTool("LS", "List files and directories inside the workspace root.", z.object({
+    path: z.string().optional()
+  }), async ({ path: requestedPath = "." }) => {
+    const resolved = await assertInsideWorkspace(requestedPath, workspaceRoot);
+    const entries = await fs.promises.readdir(resolved, { withFileTypes: true });
+    return entries
+      .filter((entry) => !entry.isSymbolicLink())
+      .slice(0, 500)
+      .map((entry) => `${entry.isDirectory() ? "dir" : "file"} ${entry.name}`)
+      .join("\n");
+  });
+
+  addTool("Glob", "Find workspace files matching a glob pattern.", z.object({
+    pattern: z.string(),
+    path: z.string().optional()
+  }), async ({ pattern, path: requestedPath = "." }) => {
+    const basePath = await assertInsideWorkspace(requestedPath, workspaceRoot);
+    const matcher = globToRegExp(pattern);
+    const files = await walkFiles(basePath, workspaceRoot);
+    return files.filter((file) => matcher.test(file) || matcher.test(path.basename(file))).slice(0, 500).join("\n");
+  });
+
+  addTool("Grep", "Search UTF-8 workspace files for a literal or regex pattern.", z.object({
+    pattern: z.string(),
+    path: z.string().optional(),
+    glob: z.string().optional(),
+    regex: z.boolean().optional()
+  }), async ({ pattern, path: requestedPath = ".", glob, regex = false }) => {
+    const basePath = await assertInsideWorkspace(requestedPath, workspaceRoot);
+    const files = await walkFiles(basePath, workspaceRoot);
+    const fileMatcher = glob ? globToRegExp(glob) : undefined;
+    const matcher = regex ? new RegExp(pattern) : undefined;
+    const matches = [];
+    for (const relativeFile of files) {
+      if (fileMatcher && !fileMatcher.test(relativeFile) && !fileMatcher.test(path.basename(relativeFile))) {
+        continue;
+      }
+      const fullPath = path.join(workspaceRoot, relativeFile);
+      let content;
+      try {
+        content = await assertReadableTextFile(fullPath);
+      } catch {
+        continue;
+      }
+      const lines = content.split(/\r?\n/);
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        if ((matcher && matcher.test(line)) || (!matcher && line.includes(pattern))) {
+          matches.push(`${relativeFile}:${index + 1}: ${line}`);
+          if (matches.length >= 500) {
+            return matches.join("\n");
+          }
+        }
+      }
+    }
+    return matches.join("\n");
+  });
+
+  if (canExposeWriteTools(provider, options.args)) {
+    addTool("Edit", "Replace existing text in a workspace file after verifying the old text is present.", z.object({
+      file_path: z.string(),
+      old_string: z.string(),
+      new_string: z.string(),
+      replace_all: z.boolean().optional()
+    }), async ({ file_path: filePath, old_string: oldString, new_string: newString, replace_all: replaceAll = false }) => {
+      const resolved = await assertInsideWorkspace(filePath, workspaceRoot);
+      const content = await assertReadableTextFile(resolved);
+      if (!content.includes(oldString)) {
+        throw new Error("old_string was not found.");
+      }
+      const updated = replaceAll ? content.split(oldString).join(newString) : content.replace(oldString, newString);
+      await fs.promises.writeFile(resolved, updated, "utf8");
+      return `edited ${path.relative(workspaceRoot, resolved)}`;
+    });
+
+    addTool("MultiEdit", "Apply ordered text replacements to a workspace file, each with preimage verification.", z.object({
+      file_path: z.string(),
+      edits: z.array(z.object({
+        old_string: z.string(),
+        new_string: z.string(),
+        replace_all: z.boolean().optional()
+      })).min(1).max(50)
+    }), async ({ file_path: filePath, edits }) => {
+      const resolved = await assertInsideWorkspace(filePath, workspaceRoot);
+      let content = await assertReadableTextFile(resolved);
+      for (const edit of edits) {
+        if (!content.includes(edit.old_string)) {
+          throw new Error("old_string was not found.");
+        }
+        content = edit.replace_all ? content.split(edit.old_string).join(edit.new_string) : content.replace(edit.old_string, edit.new_string);
+      }
+      await fs.promises.writeFile(resolved, content, "utf8");
+      return `edited ${path.relative(workspaceRoot, resolved)} (${edits.length} edits)`;
+    });
+
+    addTool("Write", "Create or overwrite a UTF-8 workspace file.", z.object({
+      file_path: z.string(),
+      content: z.string()
+    }), async ({ file_path: filePath, content }) => {
+      if (Buffer.byteLength(content, "utf8") > MAX_TOOL_BYTES) {
+        throw new Error("Content is too large.");
+      }
+      const resolved = await assertInsideWorkspace(filePath, workspaceRoot, true);
+      await fs.promises.mkdir(path.dirname(resolved), { recursive: true });
+      await fs.promises.writeFile(resolved, content, "utf8");
+      return `wrote ${path.relative(workspaceRoot, resolved)}`;
+    });
+  }
+
+  if (canExposeBashTool(provider, options.args)) {
+    addTool("Bash", "Run an approved command in the workspace root with timeout and output caps.", z.object({
+      command: z.string(),
+      timeout_ms: z.number().int().min(1000).max(120000).optional()
+    }), async ({ command, timeout_ms: timeoutMs = 30000 }) => {
+      if (/\b(rm|del|erase|rmdir|Remove-Item|git\s+reset|git\s+checkout)\b/i.test(command)) {
+        throw new Error("Command is blocked by the harness destructive-command policy.");
+      }
+      return runOpenAiBash(command, { cwd: workspaceRoot, timeoutMs });
+    });
+  }
+
+  return tools;
+}
+
+function runOpenAiBash(command, options) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, {
+      cwd: options.cwd,
+      env: process.env,
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let output = "";
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Bash timed out after ${options.timeoutMs}ms.`));
+    }, options.timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      output += chunk.toString();
+      if (Buffer.byteLength(output, "utf8") > MAX_TOOL_OUTPUT_BYTES * 2) {
+        child.kill();
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      const result = truncateToolOutput(output);
+      if (code === 0) {
+        resolve(result);
+      } else {
+        resolve(`exit=${code}\n${result}`);
+      }
+    });
+  });
 }
 
 function printAssistantText(message) {
@@ -523,6 +875,216 @@ async function runSdk(agent, prompt, provider, options) {
     }
   }
   return state.output.trim();
+}
+
+function openAiInstructions(agent, options) {
+  return `You are running as the Codex harness ${agent} agent.
+
+Work only inside this workspace: ${options.cwd}
+Use available tools for file inspection before making claims about files. Do not reveal hidden reasoning. Keep edits scoped to the user request, preserve unrelated changes, and report concrete verification evidence.`;
+}
+
+function buildOpenAiProvider(sdk, provider) {
+  return new sdk.OpenAIProvider({
+    apiKey: provider.credentialValue,
+    baseURL: provider.baseUrl,
+    useResponses: false,
+    strictFeatureValidation: false
+  });
+}
+
+function shouldPersistOpenAiSession(args) {
+  const resume = getOption(args, "resume", "CODEX_HARNESS_RESUME");
+  const continueSession = truthy(args.continue) || truthy(process.env.CODEX_HARNESS_CONTINUE);
+  return truthy(args["persist-session"]) || truthy(process.env.CODEX_HARNESS_PERSIST_SESSION) || Boolean(resume || continueSession);
+}
+
+function openAiSessionRoot(cwd) {
+  return path.join(cwd, OPENAI_SESSION_DIR);
+}
+
+function sanitizeSessionId(sessionId) {
+  const id = String(sessionId ?? "").trim();
+  if (!/^[A-Za-z0-9_.-]{1,120}$/.test(id)) {
+    throw new Error("OpenAI session ID must contain only letters, numbers, dot, dash, or underscore.");
+  }
+  return id;
+}
+
+function openAiSessionFile(cwd, sessionId) {
+  return path.join(openAiSessionRoot(cwd), `${sanitizeSessionId(sessionId)}.json`);
+}
+
+function openAiLatestSessionFile(cwd) {
+  return path.join(openAiSessionRoot(cwd), "latest.json");
+}
+
+async function readJsonFileIfPresent(filePath) {
+  try {
+    return JSON.parse(await fs.promises.readFile(filePath, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function generateOpenAiSessionId(agentName) {
+  const safeAgent = agentName.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 40) || "agent";
+  return `${safeAgent}-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function trimOpenAiSessionItems(items, resumeSessionAt) {
+  if (!resumeSessionAt) {
+    return items;
+  }
+  const index = items.findIndex((item) => item?.id === resumeSessionAt || item?.item?.id === resumeSessionAt);
+  if (index === -1) {
+    throw new Error(`OpenAI session item not found for --resume-session-at: ${resumeSessionAt}`);
+  }
+  return items.slice(0, index + 1);
+}
+
+async function resolveOpenAiSessionConfig(agentName, options, sdk) {
+  const resume = getOption(options.args, "resume", "CODEX_HARNESS_RESUME");
+  const resumeSessionAt = getOption(options.args, "resume-session-at", "CODEX_HARNESS_RESUME_SESSION_AT");
+  const continueSession = truthy(options.args.continue) || truthy(process.env.CODEX_HARNESS_CONTINUE);
+  const persistSession = shouldPersistOpenAiSession(options.args);
+  if (resume && continueSession) {
+    throw new Error("--resume and --continue are mutually exclusive.");
+  }
+  if (!persistSession) {
+    return { persistSession: false, sessionId: undefined, session: undefined };
+  }
+
+  let sessionId = resume ? sanitizeSessionId(resume) : undefined;
+  if (continueSession) {
+    const latest = await readJsonFileIfPresent(openAiLatestSessionFile(options.cwd));
+    if (!latest?.sessionId) {
+      throw new Error("No OpenAI session is available for --continue in this workspace.");
+    }
+    sessionId = sanitizeSessionId(latest.sessionId);
+  }
+  sessionId ??= generateOpenAiSessionId(agentName);
+
+  const stored = await readJsonFileIfPresent(openAiSessionFile(options.cwd, sessionId));
+  const initialItems = trimOpenAiSessionItems(Array.isArray(stored?.items) ? stored.items : [], resumeSessionAt);
+  return {
+    persistSession: true,
+    sessionId,
+    session: new sdk.MemorySession({ sessionId, initialItems })
+  };
+}
+
+async function persistOpenAiSession(cwd, agentName, sessionId, session) {
+  if (!sessionId || !session) {
+    return;
+  }
+  const sessionRoot = openAiSessionRoot(cwd);
+  await fs.promises.mkdir(sessionRoot, { recursive: true });
+  const items = await session.getItems();
+  const payload = {
+    version: 1,
+    sdk: "openai",
+    agent: agentName,
+    sessionId,
+    updatedAt: new Date().toISOString(),
+    items
+  };
+  await fs.promises.writeFile(openAiSessionFile(cwd, sessionId), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await fs.promises.writeFile(openAiLatestSessionFile(cwd), `${JSON.stringify({
+    version: 1,
+    sdk: "openai",
+    agent: agentName,
+    sessionId,
+    updatedAt: payload.updatedAt
+  }, null, 2)}\n`, "utf8");
+}
+
+function logOpenAiStreamEvent(event) {
+  if (event.type === "agent_updated_stream_event") {
+    process.stderr.write(`[openai-progress] agent=${event.agent?.name ?? "unknown"}\n`);
+    return;
+  }
+  if (event.type === "run_item_stream_event") {
+    if (event.name === "message_output_created") {
+      process.stderr.write("[openai-progress] message_output_created\n");
+    } else if (event.name === "handoff_occurred") {
+      process.stderr.write("[openai-progress] handoff_occurred\n");
+    }
+    return;
+  }
+  if (event.type === "raw_model_stream_event") {
+    const type = event.data?.type;
+    if (type && /error|failed/i.test(type)) {
+      process.stderr.write(`[openai-progress] ${type}\n`);
+    }
+  }
+}
+
+async function runOpenAiSdk(agentName, prompt, provider, options) {
+  let sdk;
+  try {
+    sdk = await import("@openai/agents");
+  } catch (error) {
+    throw new Error(`OpenAI Agents SDK import failed: ${error.message}`);
+  }
+
+  const abortController = options.overallTimeoutMs ? new AbortController() : undefined;
+  const timeout = abortController
+    ? setTimeout(() => abortController.abort(), options.overallTimeoutMs)
+    : undefined;
+  const tools = await createOpenAiTools(options, provider);
+  const modelProvider = buildOpenAiProvider(sdk, provider);
+  const sessionConfig = await resolveOpenAiSessionConfig(agentName, options, sdk);
+  sdk.setTracingDisabled(!truthy(process.env.CODEX_HARNESS_OPENAI_TRACING));
+  const agent = new sdk.Agent({
+    name: agentName,
+    instructions: openAiInstructions(agentName, options),
+    model: provider.model,
+    tools
+  });
+  const runOptions = {
+    stream: true,
+    maxTurns: options.maxTurns,
+    signal: abortController?.signal,
+    session: sessionConfig.session
+  };
+
+  process.stderr.write(`[openai-init] mode=external agent=${agentName} model=${provider.model} cwd=${options.cwd} tools=${tools.map((item) => item.name).join(",")}\n`);
+  if (sessionConfig.sessionId) {
+    process.stderr.write(`[openai-progress] session=${sessionConfig.sessionId} persist=${sessionConfig.persistSession}\n`);
+  }
+  const runner = new sdk.Runner({
+    modelProvider,
+    tracingDisabled: !truthy(process.env.CODEX_HARNESS_OPENAI_TRACING),
+    traceIncludeSensitiveData: false,
+    workflowName: "codex4claude"
+  });
+  const streamed = await runner.run(agent, prompt, runOptions);
+  try {
+    for await (const event of streamed) {
+      logOpenAiStreamEvent(event);
+    }
+    await streamed.completed;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    await modelProvider.close?.();
+  }
+  if (streamed.error) {
+    throw streamed.error;
+  }
+  await persistOpenAiSession(options.cwd, agentName, sessionConfig.sessionId, sessionConfig.session);
+  const output = String(streamed.finalOutput ?? "").trim();
+  if (output) {
+    process.stdout.write(output.endsWith("\n") ? output : `${output}\n`);
+  }
+  const turnCount = streamed.rawResponses?.length ?? streamed.currentTurn ?? "unknown";
+  process.stderr.write(`[openai-result] success turns=${turnCount} response=${streamed.lastResponseId ?? "unknown"} session=${sessionConfig.sessionId ?? "none"}\n`);
+  return output;
 }
 
 function handleCliStreamLine(line, state) {
@@ -703,6 +1265,9 @@ async function runAgent(agent, prompt, provider, options) {
     return runClaudeCli(agent, prompt, provider, options, provider.fallbackReason ?? "provider not selected");
   }
   try {
+    if ((provider.sdk ?? DEFAULT_SDK) === "openai") {
+      return await runOpenAiSdk(agent, prompt, provider, options);
+    }
     return await runSdk(agent, prompt, provider, options);
   } catch (error) {
     if (options.args["no-fallback"]) {
@@ -766,11 +1331,18 @@ async function main() {
 
   const options = { args, cwd, pluginPath, maxTurns, maxBudgetUsd, overallTimeoutMs };
   const outputs = [];
-  for (const agent of agents) {
+  for (let index = 0; index < agents.length; index += 1) {
+    const agent = agents[index];
     const provider = resolveProvider(agent, args, config);
+    if (agents.length > 1 && !args["dry-run"]) {
+      process.stderr.write(`[sequence-start] index=${index + 1}/${agents.length} agent=${agent} sdk=${provider.sdk ?? DEFAULT_SDK} mode=${provider.mode}\n`);
+    }
     const output = await runAgent(agent, sequencePrompt(prompt, outputs), provider, options);
     if (output) {
       outputs.push(`[${agent}]\n${output}`);
+    }
+    if (agents.length > 1 && !args["dry-run"]) {
+      process.stderr.write(`[sequence-result] index=${index + 1}/${agents.length} agent=${agent} output=${output ? "nonempty" : "empty"}\n`);
     }
   }
 }
