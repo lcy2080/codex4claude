@@ -5,9 +5,11 @@ $requiredFiles = @(
   "README.md",
   "AGENTS.md",
   "CLAUDE.md",
+  "package.json",
   ".github/workflows/harness-validation.yml",
   "scripts/verify-harness.ps1",
   "scripts/verify-harness.sh",
+  "scripts/run-agent-sdk.mjs",
   ".claude-plugin/marketplace.json",
   ".claude/settings.json",
   ".claude/output-styles/codex-harness.md",
@@ -16,6 +18,7 @@ $requiredFiles = @(
   ".claude/commands/review.md",
   ".claude/commands/verify.md",
   ".claude/commands/handoff.md",
+  ".claude/commands/external-agent.md",
   ".claude/agents/context-explorer.md",
   ".claude/agents/implementation-worker.md",
   ".claude/agents/code-reviewer.md",
@@ -37,6 +40,7 @@ $requiredFiles = @(
   "plugins/codex-harness/commands/review.md",
   "plugins/codex-harness/commands/verify.md",
   "plugins/codex-harness/commands/handoff.md",
+  "plugins/codex-harness/commands/external-agent.md",
   "plugins/codex-harness/skills/completion-audit/SKILL.md",
   "plugins/codex-harness/skills/surgical-editing/SKILL.md",
   "plugins/codex-harness/skills/context-triage/SKILL.md",
@@ -57,6 +61,7 @@ if ($missing.Count -gt 0) {
 
 $jsonFiles = @(
   ".claude-plugin/marketplace.json",
+  "package.json",
   ".claude/settings.json",
   "plugins/codex-harness/.claude-plugin/plugin.json",
   "plugins/codex-harness/settings.json"
@@ -85,6 +90,27 @@ if (-not (Test-Path -LiteralPath (Join-Path $root "plugins/codex-harness") -Path
   Write-Error "Marketplace codex-harness source directory is missing."
 }
 
+$package = Get-Content -LiteralPath (Join-Path $root "package.json") -Raw | ConvertFrom-Json
+if (-not $package.dependencies -or -not $package.dependencies.PSObject.Properties.Name.Contains("@anthropic-ai/claude-agent-sdk")) {
+  Write-Error "Expected package.json to depend on @anthropic-ai/claude-agent-sdk."
+}
+
+$sdkRunnerContent = Get-Content -LiteralPath (Join-Path $root "scripts/run-agent-sdk.mjs") -Raw
+$sdkRunnerExpected = @(
+  "@anthropic-ai/claude-agent-sdk",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "CODEX_HARNESS_BASE_URL",
+  "plugins/codex-harness",
+  "Use exactly one credential mode"
+)
+foreach ($expected in $sdkRunnerExpected) {
+  if ($sdkRunnerContent -notmatch [regex]::Escape($expected)) {
+    Write-Error "Expected SDK runner to contain: $expected"
+  }
+}
+
 $frontmatterFiles = $requiredFiles | Where-Object { $_ -like "*.md" -and $_ -ne "README.md" -and $_ -ne "AGENTS.md" -and $_ -ne "CLAUDE.md" -and $_ -ne "plugins/codex-harness/README.md" }
 foreach ($relativePath in $frontmatterFiles) {
   $path = Join-Path $root $relativePath
@@ -104,6 +130,7 @@ $modelFiles = @(
   ".claude/commands/review.md",
   ".claude/commands/verify.md",
   ".claude/commands/handoff.md",
+  ".claude/commands/external-agent.md",
   "plugins/codex-harness/agents/codex-main.md",
   "plugins/codex-harness/agents/context-explorer.md",
   "plugins/codex-harness/agents/implementation-worker.md",
@@ -113,7 +140,8 @@ $modelFiles = @(
   "plugins/codex-harness/commands/implement.md",
   "plugins/codex-harness/commands/review.md",
   "plugins/codex-harness/commands/verify.md",
-  "plugins/codex-harness/commands/handoff.md"
+  "plugins/codex-harness/commands/handoff.md",
+  "plugins/codex-harness/commands/external-agent.md"
 )
 
 foreach ($relativePath in $modelFiles) {
@@ -134,6 +162,7 @@ $effortFiles = @(
   ".claude/commands/review.md",
   ".claude/commands/verify.md",
   ".claude/commands/handoff.md",
+  ".claude/commands/external-agent.md",
   ".claude/skills/completion-audit/SKILL.md",
   ".claude/skills/surgical-editing/SKILL.md",
   ".claude/skills/context-triage/SKILL.md",
@@ -148,6 +177,7 @@ $effortFiles = @(
   "plugins/codex-harness/commands/review.md",
   "plugins/codex-harness/commands/verify.md",
   "plugins/codex-harness/commands/handoff.md",
+  "plugins/codex-harness/commands/external-agent.md",
   "plugins/codex-harness/skills/completion-audit/SKILL.md",
   "plugins/codex-harness/skills/surgical-editing/SKILL.md",
   "plugins/codex-harness/skills/context-triage/SKILL.md",
@@ -198,11 +228,32 @@ if ($workflowContent -notmatch "sh scripts/verify-harness\.sh") {
 if ($workflowContent -notmatch "pwsh -File scripts/verify-harness\.ps1") {
   Write-Error "Expected workflow to run the harness verifier."
 }
+if ($workflowContent -notmatch "npm install") {
+  Write-Error "Expected workflow to install npm dependencies."
+}
+if ($workflowContent -notmatch "node scripts/run-agent-sdk\.mjs --help") {
+  Write-Error "Expected workflow to validate SDK runner help."
+}
 if ($workflowContent -notmatch "claude plugin validate \.") {
   Write-Error "Expected workflow to validate marketplace manifest."
 }
 if ($workflowContent -notmatch "claude plugin validate plugins/codex-harness") {
   Write-Error "Expected workflow to validate plugin manifest."
+}
+
+$secretScanFiles = $requiredFiles | Where-Object { $_ -match "\.(md|mjs|json|yml|yaml|ps1|sh)$" -and $_ -notlike "scripts/verify-harness.*" }
+$secretPatterns = @(
+  "sk-[A-Za-z0-9_-]{12,}",
+  "your_real_api_key",
+  "paste_your_api_key"
+)
+foreach ($relativePath in $secretScanFiles) {
+  $content = Get-Content -LiteralPath (Join-Path $root $relativePath) -Raw
+  foreach ($pattern in $secretPatterns) {
+    if ($content -match $pattern) {
+      Write-Error "Potential hardcoded secret example in $relativePath matching $pattern"
+    }
+  }
 }
 
 Write-Host "Harness verification passed."
