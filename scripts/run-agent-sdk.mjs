@@ -8,6 +8,14 @@ import process from "node:process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_PROVIDER_CONFIG = "config/agent-providers.json";
+const DEFAULT_FALLBACK_AGENT = "codex-harness:codex-main";
+const DEFAULT_AGENT_FALLBACKS = {
+  "codex-main": { model: "sonnet", effort: "high" },
+  "context-explorer": { model: "haiku", effort: "low" },
+  "implementation-worker": { model: "sonnet", effort: "medium" },
+  "code-reviewer": { model: "sonnet", effort: "high" },
+  "verification-auditor": { model: "opus", effort: "max" }
+};
 
 const HELP = `Usage:
   node scripts/run-agent-sdk.mjs --prompt <text> [--agent <name>] [options]
@@ -27,6 +35,8 @@ External provider options:
   --model <name>                  SDK or Claude CLI session model. Defaults to "sonnet".
   --agent <name>                  Main-thread agent. Defaults to "codex-main".
   --effort <level>                Sets CLAUDE_CODE_EFFORT_LEVEL or passes --effort to Claude CLI.
+  --fallback-model <name>         Claude CLI fallback model alias when no agent policy overrides it.
+  --fallback-effort <level>       Claude CLI fallback effort when no agent policy overrides it.
   --haiku-model <name>            Maps the haiku alias for this run.
   --sonnet-model <name>           Maps the sonnet alias for this run.
   --opus-model <name>             Maps the opus alias for this run.
@@ -38,7 +48,8 @@ External provider options:
 
 Claude CLI fallback:
   If an agent has no external provider config, provider env is empty, or SDK execution fails,
-  the runner uses Claude Code CLI directly: claude -p --agent <agent> --model <model> --effort <level>.
+  the runner uses Claude Code CLI directly through the harness main agent:
+  claude -p --agent codex-harness:codex-main --model <model> --effort <level>.
   This preserves Claude Code Max/Pro subscription usage without calling Claude Code through Agent SDK.
 
 Environment fallbacks:
@@ -50,6 +61,8 @@ Environment fallbacks:
   CODEX_HARNESS_AGENT
   CODEX_HARNESS_AGENT_SEQUENCE
   CODEX_HARNESS_EFFORT
+  CODEX_HARNESS_FALLBACK_MODEL
+  CODEX_HARNESS_FALLBACK_EFFORT
   CODEX_HARNESS_TIMEOUT_MS
   CODEX_HARNESS_PROMPT
 `;
@@ -106,6 +119,15 @@ function assertMode(mode, agent) {
   }
 }
 
+function fallbackPolicyForAgent(agent, entry = {}, args = {}) {
+  const defaults = DEFAULT_AGENT_FALLBACKS[agent] ?? DEFAULT_AGENT_FALLBACKS["codex-main"];
+  return {
+    agent: entry.fallbackAgent ?? DEFAULT_FALLBACK_AGENT,
+    model: entry.fallbackModel ?? entry.claudeModel ?? entry.model ?? getOption(args, "fallback-model", "CODEX_HARNESS_FALLBACK_MODEL", defaults.model),
+    effort: entry.fallbackEffort ?? entry.effort ?? getOption(args, "fallback-effort", "CODEX_HARNESS_FALLBACK_EFFORT", defaults.effort)
+  };
+}
+
 async function readStdin() {
   const chunks = [];
   for await (const chunk of process.stdin) {
@@ -134,12 +156,24 @@ function providerFromManifest(agent, config) {
   const agents = config?.agents ?? {};
   const entry = agents[agent];
   if (!entry) {
-    return { mode: "claudeCli", fallbackReason: "no agent provider entry" };
+    return {
+      mode: "claudeCli",
+      fallbackReason: "no agent provider entry",
+      fallback: fallbackPolicyForAgent(agent)
+    };
   }
   const mode = entry.mode ?? "claudeCli";
   assertMode(mode, agent);
+  const fallback = fallbackPolicyForAgent(agent, entry);
   if (mode === "claudeCli") {
-    return { mode, model: entry.model, effort: entry.effort, fallbackReason: "agent configured for Claude CLI", entry };
+    return {
+      mode,
+      model: fallback.model,
+      effort: fallback.effort,
+      fallback,
+      fallbackReason: "agent configured for Claude CLI",
+      entry
+    };
   }
 
   const credential = entry.credential ?? {};
@@ -160,8 +194,9 @@ function providerFromManifest(agent, config) {
     return {
       mode: "claudeCli",
       fallbackReason: "external provider env is incomplete",
-      model: entry.model,
-      effort: entry.effort,
+      model: fallback.model,
+      effort: fallback.effort,
+      fallback,
       entry
     };
   }
@@ -173,6 +208,7 @@ function providerFromManifest(agent, config) {
     credentialValue,
     model,
     effort: entry.effort,
+    fallback,
     haikuModel: envValueFromName(entry.haikuModelEnv),
     sonnetModel: envValueFromName(entry.sonnetModelEnv),
     opusModel: envValueFromName(entry.opusModelEnv),
@@ -181,7 +217,7 @@ function providerFromManifest(agent, config) {
   };
 }
 
-function providerFromExplicitArgs(args) {
+function providerFromExplicitArgs(args, agent) {
   const baseUrl = getOption(args, "base-url", "CODEX_HARNESS_BASE_URL");
   const apiKeyEnv = getOption(args, "api-key-env", "CODEX_HARNESS_API_KEY_ENV");
   const authTokenEnv = getOption(args, "auth-token-env", "CODEX_HARNESS_AUTH_TOKEN_ENV");
@@ -196,8 +232,15 @@ function providerFromExplicitArgs(args) {
   const credentialEnv = apiKeyEnv || authTokenEnv;
   const credentialValue = envValueFromName(credentialEnv);
   const model = getOption(args, "model", "CODEX_HARNESS_MODEL", "sonnet");
+  const fallback = fallbackPolicyForAgent(agent, {}, args);
   if (!baseUrl || !credentialEnv || !credentialValue) {
-    return { mode: "claudeCli", fallbackReason: "explicit external provider env is incomplete" };
+    return {
+      mode: "claudeCli",
+      model: fallback.model,
+      effort: fallback.effort,
+      fallback,
+      fallbackReason: "explicit external provider env is incomplete"
+    };
   }
   return {
     mode: "external",
@@ -207,6 +250,7 @@ function providerFromExplicitArgs(args) {
     credentialValue,
     model,
     effort: getOption(args, "effort", "CODEX_HARNESS_EFFORT"),
+    fallback,
     haikuModel: args["haiku-model"],
     sonnetModel: args["sonnet-model"],
     opusModel: args["opus-model"],
@@ -215,20 +259,20 @@ function providerFromExplicitArgs(args) {
 }
 
 function resolveProvider(agent, args, config) {
-  const explicit = providerFromExplicitArgs(args);
+  const explicit = providerFromExplicitArgs(args, agent);
   return explicit ?? providerFromManifest(agent, config);
 }
 
-function resolveClaudeAgent(agent, provider) {
-  return provider?.entry?.claudeAgent ?? (agent === "codex-main" ? "codex-harness:codex-main" : agent);
-}
-
 function printRouting(agent, provider, args) {
+  const fallback = provider.fallback ?? fallbackPolicyForAgent(agent, provider.entry, args);
   const payload = {
     agent,
     mode: provider.mode,
     model: provider.model ?? getOption(args, "model", "CODEX_HARNESS_MODEL", "sonnet"),
     effort: provider.effort ?? getOption(args, "effort", "CODEX_HARNESS_EFFORT", "medium"),
+    fallbackAgent: fallback.agent,
+    fallbackModel: fallback.model,
+    fallbackEffort: fallback.effort,
     baseUrlEnv: provider.entry?.baseUrlEnv,
     credentialType: provider.credentialType ?? provider.entry?.credential?.type,
     credentialEnv: provider.credentialEnv ?? provider.entry?.credential?.env,
@@ -236,6 +280,26 @@ function printRouting(agent, provider, args) {
     fallbackEligible: true
   };
   process.stdout.write(`${JSON.stringify(payload)}\n`);
+}
+
+function sanitizeReason(reason, provider) {
+  let text = String(reason ?? "provider not selected");
+  if (provider?.credentialValue) {
+    text = text.split(provider.credentialValue).join("[redacted]");
+  }
+  return text.replace(/\s+/g, " ").slice(0, 500);
+}
+
+function buildFallbackPrompt(agent, prompt, provider, reason) {
+  return `Handle this Codex harness delegated agent request in the main Claude Code CLI session.
+
+Requested agent: ${agent}
+Fallback reason: ${sanitizeReason(reason, provider)}
+
+Use the requested agent's role and complexity policy, but keep normal Codex harness behavior: read relevant context first, preserve unrelated user changes, make scoped edits only when asked, and verify with concrete evidence.
+
+Original task:
+${prompt}`;
 }
 
 function buildSdkEnv(provider, args) {
@@ -318,24 +382,11 @@ async function runSdk(agent, prompt, provider, options) {
   return output.trim();
 }
 
-function runClaudeCli(agent, prompt, provider, options, reason) {
-  const model = provider.model ?? getOption(options.args, "model", "CODEX_HARNESS_MODEL", "sonnet");
-  const effort = provider.effort ?? getOption(options.args, "effort", "CODEX_HARNESS_EFFORT", "medium");
-  const cliAgent = resolveClaudeAgent(agent, provider);
-  const cliArgs = [
-    "-p",
-    "--agent",
-    cliAgent,
-    "--model",
-    model,
-    "--effort",
-    effort,
-    "--plugin-dir",
-    options.pluginPath,
-    "--no-session-persistence",
-    prompt
-  ];
-  process.stderr.write(`[fallback] mode=claudeCli agent=${agent} reason=${reason}\n`);
+function shouldRetryStandardContext(error, model) {
+  return model === "opus" && /Usage credits required|1M context|standard context/i.test(error.message);
+}
+
+function spawnClaudeCli(cliArgs, options) {
   return new Promise((resolve, reject) => {
     const child = spawn("claude", cliArgs, {
       cwd: options.cwd,
@@ -364,6 +415,40 @@ function runClaudeCli(agent, prompt, provider, options, reason) {
       }
     });
   });
+}
+
+async function runClaudeCli(agent, prompt, provider, options, reason) {
+  const fallback = provider.fallback ?? fallbackPolicyForAgent(agent, provider.entry, options.args);
+  const model = fallback.model;
+  const effort = fallback.effort;
+  const cliAgent = fallback.agent;
+  const fallbackPrompt = buildFallbackPrompt(agent, prompt, provider, reason);
+  const cliArgs = [
+    "-p",
+    "--agent",
+    cliAgent,
+    "--model",
+    model,
+    "--effort",
+    effort,
+    "--plugin-dir",
+    options.pluginPath,
+    "--no-session-persistence",
+    fallbackPrompt
+  ];
+  process.stderr.write(`[fallback] mode=claudeCli requestedAgent=${agent} cliAgent=${cliAgent} model=${model} effort=${effort} reason=${sanitizeReason(reason, provider)}\n`);
+  try {
+    return await spawnClaudeCli(cliArgs, options);
+  } catch (error) {
+    if (!shouldRetryStandardContext(error, model)) {
+      throw error;
+    }
+    const retryArgs = [...cliArgs];
+    retryArgs[retryArgs.indexOf("--model") + 1] = "sonnet";
+    retryArgs[retryArgs.indexOf("--effort") + 1] = "high";
+    process.stderr.write("[fallback-retry] mode=claudeCli model=sonnet effort=high reason=standard context required\n");
+    return spawnClaudeCli(retryArgs, options);
+  }
 }
 
 async function runAgent(agent, prompt, provider, options) {

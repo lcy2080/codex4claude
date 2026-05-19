@@ -33,4 +33,4 @@ Use explicit bearer-token mode:
 node scripts/run-agent-sdk.mjs --base-url "$CODEX_HARNESS_BASE_URL" --auth-token-env PROVIDER_TOKEN --prompt "$ARGUMENTS"
 ```
 
-If an agent has no external provider env configured, or the SDK path fails, the runner falls back to `claude -p` so Claude Code Max/Pro users keep using their normal Claude Code CLI subscription path. Report the selected agent, mode, model, fallback reason when present, and credential environment variable name, but never print credential values.
+If an agent has no external provider env configured, or the SDK path fails, the runner falls back to `claude -p --agent codex-harness:codex-main` so Claude Code Max/Pro users keep using their normal Claude Code CLI subscription path. Report the selected agent, mode, model, fallback target, fallback reason when present, and credential environment variable name, but never print credential values.
