@@ -128,13 +128,15 @@ Recommended flow:
 - `/codex-harness:review <scope>` or `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `xhigh` effort.
 - `/codex-harness:verify <scope>` or `/verify <scope>`: Map explicit requirements to actual evidence. Uses `opus` with `xhigh` effort.
 - `/codex-harness:handoff <scope>` or `/handoff <scope>`: Write a concise continuation note. Uses `haiku` with `low` effort.
-- `/codex-harness:external-agent <task>` or `/external-agent <task>`: Run the harness through the configured external SDK backend, or Claude CLI fallback. Uses `sonnet` with `medium` effort.
+- `/codex-harness:external-agent <task>` or `/external-agent <task>`: Run the harness through the configured external SDK backend, Codex CLI backend, or Claude CLI fallback. Uses `sonnet` with `medium` effort.
 
-## Run With Multi-SDK External Providers
+## Run With Multi-Backend Agent Runner
 
-The optional runner lets this harness use external APIs through either the Claude Agent SDK (`sdk: "anthropic"`) or OpenAI Agents SDK (`sdk: "openai"`). It is intentionally generic: use your provider's documentation for the exact base URL, credential type, SDK protocol, and model names. OpenAI mode uses the OpenAI Agents SDK with Chat Completions-compatible transport by default for broader provider compatibility.
+The optional runner lets this harness use external APIs through either the Claude Agent SDK (`sdk: "anthropic"`) or OpenAI Agents SDK (`sdk: "openai"`), local Codex CLI through `mode: "codexCli"`, or Claude CLI fallback through `mode: "claudeCli"`. It is intentionally generic: use your provider's documentation for the exact base URL, credential type, SDK protocol, and model names. OpenAI mode uses the OpenAI Agents SDK with Chat Completions-compatible transport by default for broader provider compatibility.
 
 Claude Code Max/Pro users should leave external provider settings empty. When provider settings are missing or the SDK path fails, the runner falls back to the installed `claude` CLI with `claude -p --agent codex-harness:codex-main`, which keeps using the normal Claude Code CLI subscription/auth path instead of calling Claude Code through Agent SDK.
+
+Codex CLI users can route an agent to local `codex exec` without provider credentials. The checked-in manifest routes `implementation-worker` through Codex CLI by default.
 
 Install the Node dependency once:
 
@@ -196,20 +198,23 @@ For production-style or provider compatibility tests, cap both agentic turns and
 node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --allowed-tools Read,Write,Edit,Glob,Grep --max-turns 10 --overall-timeout-ms 180000 --prompt "Create the requested files"
 ```
 
-Agent SDK option notes:
+Runner option notes:
 
-- `--effort low|medium|high|xhigh|max` maps to the SDK `effort` option for reasoning depth. It is also used for Claude CLI fallback.
+- `--effort low|medium|high|xhigh|max` maps to the SDK `effort` option for reasoning depth. It is also recorded for Codex CLI dry-runs and used for Claude CLI fallback.
 - `--max-turns` limits SDK agentic turns/API round trips, not elapsed time. Use `--overall-timeout-ms` when a wall-clock stop is required.
-- `--overall-timeout-ms` also bounds Claude CLI fallback runs. Fallback streams assistant text and emits progress markers such as `[fallback-init]`, `[fallback-message-start]`, `[fallback-tool-start]`, `[fallback-tool-input]`, `[fallback-tool-result]`, `[fallback-progress]`, and `[fallback-result]`.
+- `--overall-timeout-ms` also bounds Codex CLI and Claude CLI fallback runs. Fallback streams assistant text and emits progress markers such as `[fallback-init]`, `[fallback-message-start]`, `[fallback-tool-start]`, `[fallback-tool-input]`, `[fallback-tool-result]`, `[fallback-progress]`, and `[fallback-result]`.
 - Agent SDK runs emit the same style of stream summaries with the `sdk-` prefix when `--include-partial-messages` is enabled.
 - OpenAI Agents SDK runs emit `[openai-init]`, `[openai-tool-start]`, `[openai-tool-result]`, `[openai-progress]`, and `[openai-result]`.
+- Codex CLI runs spawn `codex exec` and emit `[codex-init]`, `[codex-progress]`, `[codex-tool-start]`, `[codex-tool-result]`, and `[codex-result]`.
 - OpenAI mode exposes `Read`, `LS`, `Glob`, and `Grep` by default. `Edit`, `MultiEdit`, and `Write` require `--permission-mode acceptEdits` or a manifest `allowWrite: true`. `Bash` requires `--allowed-tools Bash` or manifest `allowBash: true`, and still runs through timeout, cwd, output-cap, and destructive-command checks.
+- Codex CLI mode maps `--permission-mode default` to `--sandbox read-only --ask-for-approval on-request`, `acceptEdits` to `--sandbox workspace-write --ask-for-approval on-request`, and `bypassPermissions` to `--sandbox workspace-write --ask-for-approval never`. It does not automatically use `danger-full-access`.
+- `--allowed-tools` and `--disallowed-tools` have no direct Codex CLI equivalent and are not applied by the Codex CLI backend.
 - Read-only review runs that inspect multiple files can need more turns than small probes. Use `--max-turns 12` to `--max-turns 20` for provider smoke tests that require `LS`, `Glob`, `Read`, and final synthesis.
 - Thinking stream events are only marked as `[sdk-thinking]` or `[fallback-thinking]`; hidden reasoning text is not printed.
 - `--allowed-tools` pre-approves listed tools. It is not a strict allow-list when the preset Claude Code toolset is enabled; use `--disallowed-tools` to block known tools.
 - `--max-budget-usd` stops a query if the SDK reports that the cost budget has been exceeded.
 - Claude CLI fallback receives the same permission, tool pre-approval/block, and budget options where the installed `claude` CLI supports them.
-- `--persist-session` keeps SDK session history. In OpenAI mode, history is stored under `.codex-harness/openai-sessions/` inside the selected workspace and `[openai-result]` reports the session id. Use `--resume <session-id>` or `--continue` for multi-turn follow-up runs in the same project.
+- `--persist-session` keeps SDK session history. In OpenAI mode, history is stored under `.codex-harness/openai-sessions/` inside the selected workspace and `[openai-result]` reports the session id. Codex CLI mode lets `codex exec` keep its own session history; `--resume <session-id>` maps to `codex exec resume <session-id>` and `--continue` maps to `codex exec resume --last`. `--resume-session-at` is not supported by Codex CLI mode.
 - OpenAI tracing is opt-in with `CODEX_HARNESS_OPENAI_TRACING=1`; trace export is configured with `traceIncludeSensitiveData: false` so tool inputs, prompts, and secrets are not intentionally exported.
 
 Claude SDK options follow the Claude Agent SDK behavior documented in the official overview and TypeScript SDK reference: https://code.claude.com/docs/en/agent-sdk/overview
@@ -218,7 +223,7 @@ The runner only receives the environment variable name, not the credential value
 
 ## Agent-Specific Provider Routing
 
-Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials. Each entry can set `sdk` to `anthropic` or `openai`, and should also name an optional `sdkEnv` so `.env` files can declare the protocol next to the base URL/model/key. SDK selection priority is `--sdk`, then agent-specific `sdkEnv`, then `CODEX_HARNESS_SDK`, then manifest `sdk`, then `anthropic`.
+Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials. External entries can set `sdk` to `anthropic` or `openai`, and should also name an optional `sdkEnv` so `.env` files can declare the protocol next to the base URL/model/key. SDK selection priority is `--sdk`, then agent-specific `sdkEnv`, then `CODEX_HARNESS_SDK`, then manifest `sdk`, then `anthropic`. Codex CLI entries use `mode: "codexCli"` and do not require a base URL or credential.
 
 Default routing:
 
@@ -226,7 +231,7 @@ Default routing:
 | --- | --- | --- |
 | `codex-main` | Anthropic / Claude CLI | None |
 | `context-explorer` | Anthropic / external when configured, otherwise main Claude CLI fallback with `haiku`/`low` | `CODEX_HARNESS_CONTEXT_EXPLORER_SDK`, `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
-| `implementation-worker` | Anthropic / external when configured, otherwise main Claude CLI fallback with `sonnet`/`medium` | `CODEX_HARNESS_IMPLEMENTATION_WORKER_SDK`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL` |
+| `implementation-worker` | Codex CLI / local `codex exec` | Optional `CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_PROFILE` |
 | `code-reviewer` | Anthropic / external when configured, otherwise main Claude CLI fallback with `sonnet`/`high` | `CODEX_HARNESS_CODE_REVIEWER_SDK`, `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
 | `verification-auditor` | Anthropic / external when configured, otherwise main Claude CLI fallback with `opus`/`max` | `CODEX_HARNESS_VERIFICATION_AUDITOR_SDK`, `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
 
@@ -282,6 +287,19 @@ Or configure it per agent in `config/agent-providers.json`:
 }
 ```
 
+Configure a Codex CLI backend per agent without API credentials:
+
+```json
+{
+  "mode": "codexCli",
+  "model": "gpt-5.2",
+  "codexProfileEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_PROFILE",
+  "codexModelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL",
+  "fallbackModel": "sonnet",
+  "effort": "medium"
+}
+```
+
 Configure different providers per agent by setting different env var groups:
 
 ```bash
@@ -301,13 +319,13 @@ export CODEX_HARNESS_CODE_REVIEWER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_CODE_REVIEWER_MODEL="provider-c-review"
 ```
 
-Run multiple agents in sequence, allowing each agent to choose its own external provider or main Claude CLI fallback:
+Run multiple agents in sequence, allowing each agent to choose its own external provider, Codex CLI backend, or main Claude CLI fallback:
 
 ```bash
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --prompt "Implement and review this change"
 ```
 
-Real sequence runs emit `[sequence-start]` and `[sequence-result]` around each agent. The agent's own backend still emits its normal `[openai-*]`, `[sdk-*]`, or `[fallback-*]` markers inside that step.
+Real sequence runs emit `[sequence-start]` and `[sequence-result]` around each agent. The agent's own backend still emits its normal `[openai-*]`, `[sdk-*]`, `[codex-*]`, or `[fallback-*]` markers inside that step.
 
 Check routing before a real run:
 
@@ -315,7 +333,7 @@ Check routing before a real run:
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --dry-run --prompt "probe"
 ```
 
-Each dry-run line is sanitized. It shows the selected `agent`, `sdk`, `mode`, `model`, `effort`, main CLI fallback target, configured env var names including `sdkEnv`, OpenAI write/Bash tool exposure, and fallback reason when one applies. It never prints credential values.
+Each dry-run line is sanitized. It shows the selected `agent`, `sdk`, `mode`, `model`, `effort`, main CLI fallback target, configured env var names including `sdkEnv`, Codex profile/model env names, Codex sandbox/approval mapping, OpenAI write/Bash tool exposure, and fallback reason when one applies. It never prints credential values.
 
 The fallback prompt is sent back through the main harness agent, not through an external subagent. It includes the requested agent name, the sanitized fallback reason, and the original task so the main Claude Code CLI session can apply the same role and complexity policy. If an Opus fallback run fails because the account needs usage credits for 1M context, the runner retries once with `sonnet` and `high` effort for standard-context compatibility.
 

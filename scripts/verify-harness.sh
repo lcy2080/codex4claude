@@ -122,7 +122,7 @@ for agent_name in ["codex-main", "context-explorer", "implementation-worker", "c
     entry = provider_config.get("agents", {}).get(agent_name)
     if not entry:
         fail(f"Expected provider config entry for {agent_name}.")
-    if entry.get("mode") not in {"external", "claudeCli"}:
+    if entry.get("mode") not in {"external", "claudeCli", "codexCli"}:
         fail(f"Unsupported provider mode for {agent_name}.")
     if entry.get("sdk") and entry.get("sdk") not in {"anthropic", "openai"}:
         fail(f"Unsupported provider sdk for {agent_name}.")
@@ -134,6 +134,12 @@ for agent_name in ["codex-main", "context-explorer", "implementation-worker", "c
                 fail(f"Invalid env var name in provider config for {agent_name}.")
         if entry.get("credential", {}).get("type") not in {"apiKey", "authToken"}:
             fail(f"Unsupported credential type for {agent_name}.")
+codex_cli_provider = provider_config.get("agents", {}).get("codex-implementation-worker", {})
+if codex_cli_provider.get("mode") != "codexCli":
+    fail("Expected codex-implementation-worker provider to use codexCli mode.")
+for env_name in [codex_cli_provider.get("modelEnv"), codex_cli_provider.get("codexModelEnv"), codex_cli_provider.get("codexProfileEnv")]:
+    if env_name and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", env_name):
+        fail("Invalid Codex CLI env var name in provider config.")
 codex_main_provider = provider_config.get("agents", {}).get("codex-main", {})
 if codex_main_provider.get("model") != "sonnet" or codex_main_provider.get("effort") != "high":
     fail("Expected codex-main provider fallback to use sonnet with high effort.")
@@ -185,6 +191,12 @@ for expected in [
     "[openai-tool-",
     "[openai-progress]",
     "[openai-result]",
+    "codexCli",
+    "runCodexCli",
+    "[codex-result]",
+    "codex exec",
+    "--ask-for-approval",
+    "--sandbox",
     "[sequence-start]",
     "[sequence-result]",
     "MemorySession",
@@ -377,7 +389,7 @@ for expected in [
         fail(f"Expected workflow to contain: {expected}")
 
 secret_patterns = [
-    re.compile(r"sk-[A-Za-z0-9_-]{12,}"),
+    re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{12,}"),
     re.compile(r"your_real_api_key"),
     re.compile(r"paste_your_api_key"),
 ]

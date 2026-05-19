@@ -22,15 +22,20 @@
       "effort": "low"
     },
     "implementation-worker": {
-      "sdk": "anthropic",
-      "sdkEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_SDK",
-      "mode": "external",
-      "baseUrlEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL",
-      "credential": {
-        "type": "apiKey",
-        "env": "CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY"
-      },
-      "modelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL",
+      "mode": "codexCli",
+      "model": "gpt-5.2",
+      "modelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL",
+      "codexProfileEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_PROFILE",
+      "codexModelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL",
+      "fallbackModel": "sonnet",
+      "effort": "medium"
+    },
+    "codex-implementation-worker": {
+      "mode": "codexCli",
+      "model": "gpt-5.2",
+      "modelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL",
+      "codexProfileEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_PROFILE",
+      "codexModelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL",
       "fallbackModel": "sonnet",
       "effort": "medium"
     },
