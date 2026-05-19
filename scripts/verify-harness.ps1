@@ -6,6 +6,8 @@ $requiredFiles = @(
   "AGENTS.md",
   "CLAUDE.md",
   ".github/workflows/harness-validation.yml",
+  "scripts/verify-harness.ps1",
+  "scripts/verify-harness.sh",
   ".claude-plugin/marketplace.json",
   ".claude/settings.json",
   ".claude/output-styles/codex-harness.md",
@@ -189,6 +191,9 @@ if ($workflowContent -notmatch "name:\s+Harness Validation") {
 }
 if ($workflowContent -notmatch "name:\s+Harness validation") {
   Write-Error "Expected Harness validation job name."
+}
+if ($workflowContent -notmatch "sh scripts/verify-harness\.sh") {
+  Write-Error "Expected workflow to run the POSIX shell verifier."
 }
 if ($workflowContent -notmatch "pwsh -File scripts/verify-harness\.ps1") {
   Write-Error "Expected workflow to run the harness verifier."

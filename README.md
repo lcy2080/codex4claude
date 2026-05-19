@@ -56,18 +56,19 @@ Clone the repository:
 
 ```bash
 git clone https://github.com/lcy2080/codex4claude.git
+cd codex4claude
 ```
 
 Start Claude Code with the plugin directory:
 
 ```bash
-claude --plugin-dir ./codex4claude/plugins/codex-harness
+claude --plugin-dir ./plugins/codex-harness
 ```
 
 Use the plugin's main agent as the session default:
 
 ```bash
-claude --plugin-dir ./codex4claude/plugins/codex-harness --agent codex-harness:codex-main
+claude --plugin-dir ./plugins/codex-harness --agent codex-harness:codex-main
 ```
 
 ## Use As Project Configuration
@@ -177,7 +178,13 @@ Environment override notes:
 
 ## Verify The Harness
 
-Run the verifier after editing the harness:
+Run the verifier after editing the harness. On Linux and macOS, use the POSIX shell verifier:
+
+```bash
+sh scripts/verify-harness.sh
+```
+
+On Windows, use the PowerShell verifier:
 
 ```powershell
 pwsh -File scripts/verify-harness.ps1
@@ -187,6 +194,7 @@ The verifier checks:
 
 - Required file presence.
 - GitHub Actions harness validation workflow presence.
+- POSIX shell and PowerShell verifier coverage.
 - JSON parseability.
 - Marketplace name, owner, plugin entry, and relative source path.
 - Markdown frontmatter presence.
@@ -198,7 +206,7 @@ Expected success output:
 
 ```text
 Harness verification passed.
-Checked 36 required files.
+Checked 39 required files.
 ```
 
 ## Security Notes
@@ -209,7 +217,7 @@ For the GitHub marketplace repository, protect `main` before accepting external 
 
 - Require pull requests before merging.
 - Restrict direct pushes to `main`.
-- Require status checks for `claude plugin validate .`, `claude plugin validate plugins/codex-harness`, and `pwsh -File scripts/verify-harness.ps1`.
+- Require status checks for `claude plugin validate .`, `claude plugin validate plugins/codex-harness`, `sh scripts/verify-harness.sh`, and `pwsh -File scripts/verify-harness.ps1`.
 - Require signed commits if that fits your release process.
 
 This repository includes a `Harness Validation` GitHub Actions workflow with a `Harness validation` check that runs those validations on pushes and pull requests targeting `main`.
