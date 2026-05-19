@@ -30,7 +30,10 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Verify harness structure
+      - name: Verify harness structure with POSIX shell
+        run: sh scripts/verify-harness.sh
+
+      - name: Verify harness structure with PowerShell
         shell: pwsh
         run: pwsh -File scripts/verify-harness.ps1
 
