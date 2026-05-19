@@ -1,0 +1,46 @@
+{
+  "agents": {
+    "codex-main": {
+      "mode": "claudeCli",
+      "claudeAgent": "codex-harness:codex-main",
+      "model": "sonnet",
+      "effort": "high"
+    },
+    "context-explorer": {
+      "mode": "external",
+      "baseUrlEnv": "MINIMAX_BASE_URL",
+      "credential": {
+        "type": "apiKey",
+        "env": "MINIMAX_API_KEY"
+      },
+      "modelEnv": "MINIMAX_FAST_MODEL",
+      "effort": "low"
+    },
+    "implementation-worker": {
+      "mode": "external",
+      "baseUrlEnv": "MINIMAX_BASE_URL",
+      "credential": {
+        "type": "apiKey",
+        "env": "MINIMAX_API_KEY"
+      },
+      "modelEnv": "MINIMAX_CODER_MODEL",
+      "effort": "medium"
+    },
+    "code-reviewer": {
+      "mode": "external",
+      "baseUrlEnv": "CODEX_PROVIDER_BASE_URL",
+      "credential": {
+        "type": "apiKey",
+        "env": "CODEX_PROVIDER_API_KEY"
+      },
+      "modelEnv": "CODEX_PROVIDER_REVIEW_MODEL",
+      "effort": "high"
+    },
+    "verification-auditor": {
+      "mode": "claudeCli",
+      "claudeAgent": "verification-auditor",
+      "model": "opus",
+      "effort": "max"
+    }
+  }
+}
