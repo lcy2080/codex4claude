@@ -110,7 +110,7 @@ foreach ($agentName in $requiredProviderAgents) {
   if (-not $entry) {
     Write-Error "Expected provider config entry for $agentName."
   }
-  if ($entry.mode -notin @("external", "claudeCli")) {
+  if ($entry.mode -notin @("external", "claudeCli", "codexCli")) {
     Write-Error "Unsupported provider mode for $agentName."
   }
   if ($entry.sdk -and $entry.sdk -notin @("anthropic", "openai")) {
@@ -129,6 +129,16 @@ foreach ($agentName in $requiredProviderAgents) {
     if ($entry.credential.type -notin @("apiKey", "authToken")) {
       Write-Error "Unsupported credential type for $agentName."
     }
+  }
+}
+$codexCliProvider = $providerConfig.agents."codex-implementation-worker"
+if (-not $codexCliProvider -or $codexCliProvider.mode -ne "codexCli") {
+  Write-Error "Expected codex-implementation-worker provider to use codexCli mode."
+}
+$codexCliEnvFields = @($codexCliProvider.modelEnv, $codexCliProvider.codexModelEnv, $codexCliProvider.codexProfileEnv) | Where-Object { $_ }
+foreach ($envName in $codexCliEnvFields) {
+  if ($envName -notmatch "^[A-Za-z_][A-Za-z0-9_]*$") {
+    Write-Error "Invalid Codex CLI env var name in provider config."
   }
 }
 if ($providerConfig.agents."codex-main".model -ne "sonnet" -or $providerConfig.agents."codex-main".effort -ne "high") {
@@ -185,6 +195,12 @@ $sdkRunnerExpected = @(
   "[openai-tool-",
   "[openai-progress]",
   "[openai-result]",
+  "codexCli",
+  "runCodexCli",
+  "[codex-result]",
+  "codex exec",
+  "--ask-for-approval",
+  "--sandbox",
   "[sequence-start]",
   "[sequence-result]",
   "MemorySession",
@@ -396,7 +412,7 @@ if ($workflowContent -notmatch "claude plugin validate plugins/codex-harness") {
 
 $secretScanFiles = $requiredFiles | Where-Object { $_ -match "\.(md|mjs|json|yml|yaml|ps1|sh)$" -and $_ -notlike "scripts/verify-harness.*" }
 $secretPatterns = @(
-  "sk-[A-Za-z0-9_-]{12,}",
+  "(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{12,}",
   "your_real_api_key",
   "paste_your_api_key"
 )

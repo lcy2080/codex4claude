@@ -30,18 +30,18 @@ const HELP = `Usage:
 
 Provider routing:
   --agent-provider-config <path>  Agent provider manifest. Defaults to config/agent-providers.json.
-  --agent-sequence <a,b,c>        Run agents sequentially, selecting provider or Claude CLI per agent.
+  --agent-sequence <a,b,c>        Run agents sequentially, selecting provider, Codex CLI, or Claude CLI per agent.
   --sdk <openai|anthropic>        External provider SDK. Overrides sdkEnv and manifest sdk.
-  --dry-run                      Print sanitized routing decisions without SDK/API/Claude CLI execution.
+  --dry-run                      Print sanitized routing decisions without SDK/API/CLI execution.
   --no-fallback                  Fail instead of falling back to Claude CLI.
 
 External provider options:
   --base-url <url>                Provider endpoint URL.
   --api-key-env <ENV_NAME>        Environment variable containing an API key.
   --auth-token-env <ENV_NAME>     Environment variable containing a bearer token.
-  --model <name>                  SDK or Claude CLI session model. Defaults to "sonnet".
+  --model <name>                  SDK, Codex CLI, or Claude CLI session model. Defaults to "sonnet".
   --agent <name>                  Main-thread agent. Defaults to "codex-main".
-  --effort <level>                SDK reasoning effort, and Claude CLI fallback effort.
+  --effort <level>                SDK reasoning effort, Codex CLI effort metadata, and Claude CLI fallback effort.
   --fallback-model <name>         Claude CLI fallback model alias when no agent policy overrides it.
   --fallback-effort <level>       Claude CLI fallback effort when no agent policy overrides it.
   --haiku-model <name>            Maps the haiku alias for this run.
@@ -49,17 +49,17 @@ External provider options:
   --opus-model <name>             Maps the opus alias for this run.
   --timeout-ms <number>           Sets API_TIMEOUT_MS for compatible providers.
   --overall-timeout-ms <number>   Aborts the SDK query after this many milliseconds.
-                                  Also bounds Claude CLI fallback runtime.
+                                  Also bounds Codex CLI and Claude CLI fallback runtime.
   --max-turns <number>            Maximum SDK agentic turns.
   --max-budget-usd <number>       Maximum SDK cost before stopping.
-  --permission-mode <mode>        SDK permission mode. Defaults to "default".
+  --permission-mode <mode>        SDK permission mode. Maps to Codex CLI sandbox/approval. Defaults to "default".
   --allowed-tools <a,b,c>         Auto-approved SDK tool names.
   --disallowed-tools <a,b,c>      Blocked SDK tool names.
   --include-partial-messages      Emit SDK partial streaming messages when available.
   --persist-session               Persist SDK session history for later resume/continue.
-  --resume <session-id>           Resume an SDK session by ID.
+  --resume <session-id>           Resume an SDK or Codex CLI session by ID.
   --resume-session-at <message-id> Resume an SDK session up to a message UUID.
-  --continue                      Continue the latest SDK session in the current directory.
+  --continue                      Continue the latest SDK or Codex CLI session in the current directory.
   --cwd <path>                    Working directory. Defaults to current directory.
   --plugin-path <path>            Plugin path. Defaults to plugins/codex-harness.
   --help                         Show this help.
@@ -69,6 +69,10 @@ Claude CLI fallback:
   the runner uses Claude Code CLI directly through the harness main agent:
   claude -p --agent codex-harness:codex-main --model <model> --effort <level>.
   This preserves Claude Code Max/Pro subscription usage without calling Claude Code through Agent SDK.
+
+Codex CLI backend:
+  Agents with mode "codexCli" run local codex exec with --sandbox and --ask-for-approval
+  mapped from --permission-mode. --allowed-tools and --disallowed-tools are not applied.
 
 Environment fallbacks:
   CODEX_HARNESS_SDK
@@ -163,7 +167,7 @@ function assertEnvName(name, fieldName) {
 }
 
 function assertMode(mode, agent) {
-  if (mode !== "external" && mode !== "claudeCli") {
+  if (mode !== "external" && mode !== "claudeCli" && mode !== "codexCli") {
     throw new Error(`Agent ${agent} has unsupported provider mode: ${mode}`);
   }
 }
@@ -230,6 +234,22 @@ function providerFromManifest(agent, config, args = {}) {
   assertMode(mode, agent);
   const sdk = sdkForEntry(agent, entry, args);
   const fallback = fallbackPolicyForAgent(agent, entry);
+  if (mode === "codexCli") {
+    assertEnvName(entry.modelEnv, `${agent}.modelEnv`);
+    assertEnvName(entry.codexModelEnv, `${agent}.codexModelEnv`);
+    assertEnvName(entry.codexProfileEnv, `${agent}.codexProfileEnv`);
+    return {
+      mode,
+      sdk,
+      model: args.model ?? envValueFromName(entry.codexModelEnv) ?? envValueFromName(entry.modelEnv) ?? process.env.CODEX_HARNESS_MODEL ?? entry.model ?? "sonnet",
+      effort: entry.effort ?? getOption(args, "effort", "CODEX_HARNESS_EFFORT", "medium"),
+      codexProfile: envValueFromName(entry.codexProfileEnv) ?? entry.codexProfile,
+      codexProfileEnv: entry.codexProfileEnv,
+      codexModelEnv: entry.codexModelEnv ?? entry.modelEnv,
+      fallback,
+      entry
+    };
+  }
   if (mode === "claudeCli") {
     return {
       mode,
@@ -353,8 +373,13 @@ function printRouting(agent, provider, args) {
     baseUrlEnv: provider.entry?.baseUrlEnv,
     credentialType: provider.credentialType ?? provider.entry?.credential?.type,
     credentialEnv: provider.credentialEnv ?? provider.entry?.credential?.env,
-    writeTools: canExposeWriteTools(provider, args),
-    bashTool: canExposeBashTool(provider, args),
+    writeTools: provider.mode === "codexCli" ? false : canExposeWriteTools(provider, args),
+    bashTool: provider.mode === "codexCli" ? false : canExposeBashTool(provider, args),
+    codexProfileEnv: provider.codexProfileEnv ?? provider.entry?.codexProfileEnv,
+    codexModelEnv: provider.codexModelEnv ?? provider.entry?.codexModelEnv,
+    sandbox: provider.mode === "codexCli" ? codexCliPermissionMapping(args).sandbox : undefined,
+    approvalPolicy: provider.mode === "codexCli" ? codexCliPermissionMapping(args).approvalPolicy : undefined,
+    toolPolicyNote: provider.mode === "codexCli" ? "--allowed-tools and --disallowed-tools are not applied by the Codex CLI backend" : undefined,
     persistSession: shouldPersistOpenAiSession(args),
     resume,
     continue: continueSession,
@@ -370,6 +395,17 @@ function sanitizeReason(reason, provider) {
     text = text.split(provider.credentialValue).join("[redacted]");
   }
   return text.replace(/\s+/g, " ").slice(0, 500);
+}
+
+function codexCliPermissionMapping(args) {
+  const permissionMode = getOption(args, "permission-mode", "CODEX_HARNESS_PERMISSION_MODE", "default");
+  if (permissionMode === "acceptEdits") {
+    return { sandbox: "workspace-write", approvalPolicy: "on-request" };
+  }
+  if (permissionMode === "bypassPermissions") {
+    return { sandbox: "workspace-write", approvalPolicy: "never" };
+  }
+  return { sandbox: "read-only", approvalPolicy: "on-request" };
 }
 
 function buildFallbackPrompt(agent, prompt, provider, reason) {
@@ -1201,6 +1237,192 @@ function spawnClaudeCli(cliArgs, options) {
   });
 }
 
+function codexEventText(message) {
+  if (typeof message.text === "string") {
+    return message.text;
+  }
+  if (typeof message.delta === "string") {
+    return message.delta;
+  }
+  if (typeof message.result === "string") {
+    return message.result;
+  }
+  if (typeof message.output === "string") {
+    return message.output;
+  }
+  if (typeof message.final_output === "string") {
+    return message.final_output;
+  }
+  const content = message.message?.content ?? message.item?.content ?? message.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => typeof part === "string" ? part : part?.text ?? part?.content ?? "")
+      .filter(Boolean)
+      .join("");
+  }
+  return "";
+}
+
+function handleCodexCliStreamLine(line, state) {
+  if (!line.trim()) {
+    return;
+  }
+  let message;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    process.stdout.write(line.endsWith("\n") ? line : `${line}\n`);
+    state.output += line.endsWith("\n") ? line : `${line}\n`;
+    return;
+  }
+
+  const type = String(message.type ?? message.event ?? "");
+  if (/session|init|started/i.test(type) && !state.sawInit) {
+    state.sawInit = true;
+    process.stderr.write(`[codex-init] session=${message.session_id ?? message.sessionId ?? message.id ?? "unknown"} model=${message.model ?? "unknown"} cwd=${message.cwd ?? "unknown"}\n`);
+  }
+  if (/tool.*start|item.*start/i.test(type) || message.item?.type === "tool_call") {
+    process.stderr.write(`[codex-tool-start] ${message.name ?? message.item?.name ?? message.tool_name ?? "unknown"}\n`);
+    return;
+  }
+  if (/tool.*result|item.*complete/i.test(type) || message.item?.type === "tool_call_output") {
+    process.stderr.write("[codex-tool-result]\n");
+    return;
+  }
+  if (/progress|turn|agent|status/i.test(type)) {
+    process.stderr.write(`[codex-progress] ${type || "event"}\n`);
+  }
+
+  const text = codexEventText(message);
+  if (text && !/result|complete|done/i.test(type)) {
+    process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+    state.output += text.endsWith("\n") ? text : `${text}\n`;
+    return;
+  }
+  if (/error|failed/i.test(type) || message.error) {
+    state.failure = `Codex CLI result failed: ${message.error?.message ?? message.message ?? type}`;
+    return;
+  }
+  if (/result|complete|done/i.test(type)) {
+    if (text && !state.output.trim()) {
+      process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+      state.output += text.endsWith("\n") ? text : `${text}\n`;
+    }
+    process.stderr.write(`[codex-result] success session=${message.session_id ?? message.sessionId ?? message.id ?? "unknown"}\n`);
+  }
+}
+
+function spawnCodexCli(cliArgs, options) {
+  return new Promise((resolve, reject) => {
+    const codexCommand = resolveCodexCommand(cliArgs);
+    const child = spawn(codexCommand.command, codexCommand.args, {
+      cwd: options.cwd,
+      env: process.env,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const state = { output: "", failure: undefined, sawInit: false };
+    let stdout = "";
+    let stderr = "";
+    let bufferedStdout = "";
+    const startedAt = Date.now();
+    const progress = setInterval(() => {
+      process.stderr.write(`[codex-progress] running elapsedMs=${Date.now() - startedAt}\n`);
+    }, 15000);
+    const timeout = options.overallTimeoutMs
+      ? setTimeout(() => {
+          process.stderr.write(`[codex-timeout] elapsedMs=${Date.now() - startedAt} limitMs=${options.overallTimeoutMs}\n`);
+          child.kill();
+        }, options.overallTimeoutMs)
+      : undefined;
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      bufferedStdout += text;
+      const lines = bufferedStdout.split(/\r?\n/);
+      bufferedStdout = lines.pop() ?? "";
+      for (const line of lines) {
+        handleCodexCliStreamLine(line, state);
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      process.stderr.write(text);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      clearInterval(progress);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      if (bufferedStdout) {
+        handleCodexCliStreamLine(bufferedStdout, state);
+      }
+      if (state.failure) {
+        reject(new Error(state.failure));
+        return;
+      }
+      if (code === 0) {
+        resolve((state.output || stdout).trim());
+      } else {
+        reject(new Error(`Codex CLI exited with code ${code}: ${stderr.trim()}`));
+      }
+    });
+  });
+}
+
+function resolveCodexCommand(cliArgs) {
+  if (process.platform !== "win32") {
+    return { command: "codex", args: cliArgs };
+  }
+  const npmCodexPs1 = process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "codex.ps1") : undefined;
+  if (npmCodexPs1 && fs.existsSync(npmCodexPs1)) {
+    return { command: "pwsh", args: ["-File", npmCodexPs1, ...cliArgs] };
+  }
+  return { command: "codex", args: cliArgs };
+}
+
+async function runCodexCli(agent, prompt, provider, options) {
+  const resume = getOption(options.args, "resume", "CODEX_HARNESS_RESUME");
+  const resumeSessionAt = getOption(options.args, "resume-session-at", "CODEX_HARNESS_RESUME_SESSION_AT");
+  const continueSession = truthy(options.args.continue) || truthy(process.env.CODEX_HARNESS_CONTINUE);
+  if (resume && continueSession) {
+    throw new Error("--resume and --continue are mutually exclusive.");
+  }
+  if (resumeSessionAt) {
+    throw new Error("--resume-session-at is not supported by the Codex CLI backend.");
+  }
+
+  const { sandbox, approvalPolicy } = codexCliPermissionMapping(options.args);
+  const model = provider.model ?? getOption(options.args, "model", "CODEX_HARNESS_MODEL", "sonnet");
+  const cliArgs = [
+    "--ask-for-approval",
+    approvalPolicy,
+    "--sandbox",
+    sandbox,
+    "--cd",
+    options.cwd,
+    "--model",
+    model
+  ];
+  if (provider.codexProfile) {
+    cliArgs.push("--profile", provider.codexProfile);
+  }
+  cliArgs.push("exec");
+  if (continueSession) {
+    cliArgs.push("resume", "--last");
+  } else if (resume) {
+    cliArgs.push("resume", resume);
+  }
+  cliArgs.push("--json", prompt);
+  process.stderr.write(`[codex-init] mode=codexCli agent=${agent} model=${model} cwd=${options.cwd} sandbox=${sandbox} approval=${approvalPolicy}\n`);
+  return spawnCodexCli(cliArgs, options);
+}
+
 async function runClaudeCli(agent, prompt, provider, options, reason) {
   const fallback = provider.fallback ?? fallbackPolicyForAgent(agent, provider.entry, options.args);
   const model = fallback.model;
@@ -1257,6 +1479,16 @@ async function runAgent(agent, prompt, provider, options) {
   if (options.args["dry-run"]) {
     printRouting(agent, provider, options.args);
     return "";
+  }
+  if (provider.mode === "codexCli") {
+    try {
+      return await runCodexCli(agent, prompt, provider, options);
+    } catch (error) {
+      if (options.args["no-fallback"]) {
+        throw error;
+      }
+      return runClaudeCli(agent, prompt, provider, options, error.message);
+    }
   }
   if (provider.mode !== "external") {
     if (options.args["no-fallback"]) {
