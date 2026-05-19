@@ -9,6 +9,7 @@ README.md
 AGENTS.md
 CLAUDE.md
 package.json
+config/agent-providers.json
 .github/workflows/harness-validation.yml
 .claude-plugin/marketplace.json
 .claude/settings.json
@@ -87,6 +88,7 @@ def fail(message):
 json_files = [
     ".claude-plugin/marketplace.json",
     "package.json",
+    "config/agent-providers.json",
     ".claude/settings.json",
     "plugins/codex-harness/.claude-plugin/plugin.json",
     "plugins/codex-harness/settings.json",
@@ -111,6 +113,20 @@ package = json.loads(read("package.json"))
 if "@anthropic-ai/claude-agent-sdk" not in package.get("dependencies", {}):
     fail("Expected package.json to depend on @anthropic-ai/claude-agent-sdk.")
 
+provider_config = json.loads(read("config/agent-providers.json"))
+for agent_name in ["codex-main", "context-explorer", "implementation-worker", "code-reviewer", "verification-auditor"]:
+    entry = provider_config.get("agents", {}).get(agent_name)
+    if not entry:
+        fail(f"Expected provider config entry for {agent_name}.")
+    if entry.get("mode") not in {"external", "claudeCli"}:
+        fail(f"Unsupported provider mode for {agent_name}.")
+    if entry.get("mode") == "external":
+        for env_name in [entry.get("baseUrlEnv"), entry.get("credential", {}).get("env"), entry.get("modelEnv")]:
+            if env_name and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", env_name):
+                fail(f"Invalid env var name in provider config for {agent_name}.")
+        if entry.get("credential", {}).get("type") not in {"apiKey", "authToken"}:
+            fail(f"Unsupported credential type for {agent_name}.")
+
 sdk_runner = read("scripts/run-agent-sdk.mjs")
 for expected in [
     "@anthropic-ai/claude-agent-sdk",
@@ -118,8 +134,12 @@ for expected in [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "CODEX_HARNESS_BASE_URL",
+    "CODEX_HARNESS_AGENT_PROVIDER_CONFIG",
     "plugins/codex-harness",
-    "Use exactly one credential mode",
+    "--agent-provider-config",
+    "--agent-sequence",
+    "--dry-run",
+    "Claude CLI fallback",
 ]:
     if expected not in sdk_runner:
         fail(f"Expected SDK runner to contain: {expected}")
@@ -247,6 +267,8 @@ for expected in [
     "pwsh -File scripts/verify-harness.ps1",
     "npm install",
     "node scripts/run-agent-sdk.mjs --help",
+    "node scripts/run-agent-sdk.mjs --agent context-explorer --dry-run",
+    "node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,code-reviewer --dry-run",
     "claude plugin validate .",
     "claude plugin validate plugins/codex-harness",
 ]:
@@ -263,6 +285,7 @@ for scan_root in [
     "AGENTS.md",
     "CLAUDE.md",
     "package.json",
+    "config/agent-providers.json",
     ".github",
     ".claude-plugin",
     ".claude",

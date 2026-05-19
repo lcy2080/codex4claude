@@ -132,7 +132,9 @@ Recommended flow:
 
 ## Run With Anthropic-Compatible Providers
 
-The optional SDK runner lets this harness use external APIs that expose an Anthropic-compatible endpoint. It is intentionally generic: use your provider's documentation for the exact base URL, credential type, and model names. This applies to MiniMax, Z.ai, and similar providers when they expose an Anthropic-compatible API, but this repository does not hardcode provider profiles.
+The optional runner lets this harness use external APIs that expose an Anthropic-compatible endpoint. It is intentionally generic: use your provider's documentation for the exact base URL, credential type, and model names. This applies to MiniMax, Z.ai, and similar providers when they expose an Anthropic-compatible API, but this repository does not hardcode provider profiles.
+
+Claude Code Max/Pro users should leave external provider settings empty. When provider settings are missing or the SDK path fails, the runner falls back to the installed `claude` CLI with `claude -p`, which keeps using the normal Claude Code CLI subscription/auth path instead of calling Claude Code through Agent SDK.
 
 Install the Node dependency once:
 
@@ -171,6 +173,33 @@ node scripts/run-agent-sdk.mjs --api-key-env PROVIDER_API_KEY --model provider-s
 ```
 
 The runner only receives the environment variable name, not the credential value. Do not put provider keys in prompts, command history examples, README edits, or plugin manifests.
+
+## Agent-Specific Provider Routing
+
+Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials.
+
+Dry-run a single agent without calling any API:
+
+```bash
+node scripts/run-agent-sdk.mjs --agent context-explorer --dry-run --prompt "probe"
+```
+
+Run a specific agent. If all required provider env vars are set, this uses the external Anthropic-compatible provider for that agent. If any required provider env var is empty, it uses Claude CLI fallback:
+
+```bash
+export CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL="https://provider.example/anthropic"
+export CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY="set-in-your-shell"
+export CODEX_HARNESS_CONTEXT_EXPLORER_MODEL="provider-small"
+node scripts/run-agent-sdk.mjs --agent context-explorer --prompt "Map the files involved"
+```
+
+Run multiple agents in sequence, allowing each agent to choose its own external provider or Claude CLI fallback:
+
+```bash
+node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --prompt "Implement and review this change"
+```
+
+The default manifest routes `codex-main` to Claude CLI and defines external-provider env var names for `context-explorer`, `implementation-worker`, `code-reviewer`, and `verification-auditor`. Leave those env vars unset to use Claude CLI fallback for Max/Pro-compatible usage.
 
 ## Agents
 
@@ -220,6 +249,7 @@ Environment override notes:
 - `CLAUDE.md`: Project memory for local use.
 - `AGENTS.md`: Editing instructions for agents working on this repository.
 - `package.json`: Node dependency and npm script entry points for the optional SDK runner.
+- `config/agent-providers.json`: Env-only agent provider routing manifest.
 - `scripts/run-agent-sdk.mjs`: Generic Claude Agent SDK runner for Anthropic-compatible providers.
 - `scripts/verify-harness.ps1`: Structural verifier for the harness.
 - `scripts/verify-harness.sh`: POSIX shell verifier for Linux and macOS.
@@ -244,6 +274,7 @@ The verifier checks:
 - GitHub Actions harness validation workflow presence.
 - POSIX shell and PowerShell verifier coverage.
 - Optional Claude Agent SDK runner and npm dependency coverage.
+- Agent-specific provider routing manifest coverage.
 - JSON parseability.
 - Marketplace name, owner, plugin entry, and relative source path.
 - Markdown frontmatter presence.
@@ -256,14 +287,16 @@ Expected success output:
 
 ```text
 Harness verification passed.
-Checked 43 required files.
+Checked 44 required files.
 ```
 
 ## Security Notes
 
 When using the project-local `.claude` configuration, shell searches and workspace verifier execution are approval-gated. This avoids bypassing file-read deny rules with shell output and avoids automatically executing a verifier script that may have been modified in the workspace.
 
-For external providers, keep credentials outside the repository and pass only the credential environment variable name to the SDK runner. The verifier rejects common secret-looking examples, but it is not a substitute for secret scanning before publishing.
+For external providers, keep credentials outside the repository and pass only credential environment variable names to the runner. The verifier rejects common secret-looking examples, but it is not a substitute for secret scanning before publishing.
+
+Do not use external Agent SDK routing as a workaround for Claude Code Max/Pro access. Leave provider env vars empty so the runner uses the installed Claude Code CLI directly.
 
 For the GitHub marketplace repository, protect `main` before accepting external contributions. Recommended rules:
 
