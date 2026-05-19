@@ -1,0 +1,50 @@
+{
+  "agents": {
+    "codex-main": {
+      "mode": "claudeCli",
+      "claudeAgent": "codex-harness:codex-main",
+      "model": "opus",
+      "effort": "high"
+    },
+    "context-explorer": {
+      "mode": "external",
+      "baseUrlEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL",
+      "credential": {
+        "type": "apiKey",
+        "env": "CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY"
+      },
+      "modelEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_MODEL",
+      "effort": "low"
+    },
+    "implementation-worker": {
+      "mode": "external",
+      "baseUrlEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL",
+      "credential": {
+        "type": "apiKey",
+        "env": "CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY"
+      },
+      "modelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL",
+      "effort": "medium"
+    },
+    "code-reviewer": {
+      "mode": "external",
+      "baseUrlEnv": "CODEX_HARNESS_CODE_REVIEWER_BASE_URL",
+      "credential": {
+        "type": "apiKey",
+        "env": "CODEX_HARNESS_CODE_REVIEWER_API_KEY"
+      },
+      "modelEnv": "CODEX_HARNESS_CODE_REVIEWER_MODEL",
+      "effort": "high"
+    },
+    "verification-auditor": {
+      "mode": "external",
+      "baseUrlEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL",
+      "credential": {
+        "type": "apiKey",
+        "env": "CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY"
+      },
+      "modelEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL",
+      "effort": "xhigh"
+    }
+  }
+}

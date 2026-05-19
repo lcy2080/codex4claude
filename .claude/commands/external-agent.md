@@ -7,18 +7,30 @@ effort: medium
 
 Task: $ARGUMENTS
 
-Use `scripts/run-agent-sdk.mjs` when the user explicitly wants this task to run through an Anthropic-compatible external provider. Do not ask the user to paste API keys into chat. Require credentials to already exist in a shell environment variable and pass only that variable name to the runner.
+Use `scripts/run-agent-sdk.mjs` when the user explicitly wants this task to run through an Anthropic-compatible external provider or the configured Claude CLI fallback. Do not ask the user to paste API keys into chat. Require external provider credentials to already exist in shell environment variables and pass only variable names to the runner.
 
-Use API-key mode:
+Prefer agent provider routing:
+
+```bash
+node scripts/run-agent-sdk.mjs --agent context-explorer --prompt "$ARGUMENTS"
+```
+
+Use sequence routing when the task should pass through multiple agents:
+
+```bash
+node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --prompt "$ARGUMENTS"
+```
+
+Use explicit API-key mode for one-off external provider runs:
 
 ```bash
 node scripts/run-agent-sdk.mjs --base-url "$CODEX_HARNESS_BASE_URL" --api-key-env PROVIDER_API_KEY --prompt "$ARGUMENTS"
 ```
 
-Use bearer-token mode:
+Use explicit bearer-token mode:
 
 ```bash
 node scripts/run-agent-sdk.mjs --base-url "$CODEX_HARNESS_BASE_URL" --auth-token-env PROVIDER_TOKEN --prompt "$ARGUMENTS"
 ```
 
-If the provider does not accept Claude model aliases, include `--model <provider-model>` or alias mappings such as `--sonnet-model <provider-model>`. Report the provider base URL, selected model, and credential environment variable name, but never print the credential value.
+If an agent has no external provider env configured, or the SDK path fails, the runner falls back to `claude -p` so Claude Code Max/Pro users keep using their normal Claude Code CLI subscription path. Report the selected agent, mode, model, fallback reason when present, and credential environment variable name, but never print credential values.

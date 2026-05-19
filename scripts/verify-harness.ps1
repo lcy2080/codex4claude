@@ -6,6 +6,7 @@ $requiredFiles = @(
   "AGENTS.md",
   "CLAUDE.md",
   "package.json",
+  "config/agent-providers.json",
   ".github/workflows/harness-validation.yml",
   "scripts/verify-harness.ps1",
   "scripts/verify-harness.sh",
@@ -62,6 +63,7 @@ if ($missing.Count -gt 0) {
 $jsonFiles = @(
   ".claude-plugin/marketplace.json",
   "package.json",
+  "config/agent-providers.json",
   ".claude/settings.json",
   "plugins/codex-harness/.claude-plugin/plugin.json",
   "plugins/codex-harness/settings.json"
@@ -95,6 +97,29 @@ if (-not $package.dependencies -or -not $package.dependencies.PSObject.Propertie
   Write-Error "Expected package.json to depend on @anthropic-ai/claude-agent-sdk."
 }
 
+$providerConfig = Get-Content -LiteralPath (Join-Path $root "config/agent-providers.json") -Raw | ConvertFrom-Json
+$requiredProviderAgents = @("codex-main", "context-explorer", "implementation-worker", "code-reviewer", "verification-auditor")
+foreach ($agentName in $requiredProviderAgents) {
+  $entry = $providerConfig.agents.PSObject.Properties[$agentName].Value
+  if (-not $entry) {
+    Write-Error "Expected provider config entry for $agentName."
+  }
+  if ($entry.mode -notin @("external", "claudeCli")) {
+    Write-Error "Unsupported provider mode for $agentName."
+  }
+  if ($entry.mode -eq "external") {
+    $envFields = @($entry.baseUrlEnv, $entry.credential.env, $entry.modelEnv) | Where-Object { $_ }
+    foreach ($envName in $envFields) {
+      if ($envName -notmatch "^[A-Za-z_][A-Za-z0-9_]*$") {
+        Write-Error "Invalid env var name in provider config for $agentName."
+      }
+    }
+    if ($entry.credential.type -notin @("apiKey", "authToken")) {
+      Write-Error "Unsupported credential type for $agentName."
+    }
+  }
+}
+
 $sdkRunnerContent = Get-Content -LiteralPath (Join-Path $root "scripts/run-agent-sdk.mjs") -Raw
 $sdkRunnerExpected = @(
   "@anthropic-ai/claude-agent-sdk",
@@ -102,8 +127,12 @@ $sdkRunnerExpected = @(
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
   "CODEX_HARNESS_BASE_URL",
+  "CODEX_HARNESS_AGENT_PROVIDER_CONFIG",
   "plugins/codex-harness",
-  "Use exactly one credential mode"
+  "--agent-provider-config",
+  "--agent-sequence",
+  "--dry-run",
+  "Claude CLI fallback"
 )
 foreach ($expected in $sdkRunnerExpected) {
   if ($sdkRunnerContent -notmatch [regex]::Escape($expected)) {
@@ -233,6 +262,12 @@ if ($workflowContent -notmatch "npm install") {
 }
 if ($workflowContent -notmatch "node scripts/run-agent-sdk\.mjs --help") {
   Write-Error "Expected workflow to validate SDK runner help."
+}
+if ($workflowContent -notmatch "node scripts/run-agent-sdk\.mjs --agent context-explorer --dry-run") {
+  Write-Error "Expected workflow to validate single-agent provider dry-run."
+}
+if ($workflowContent -notmatch "node scripts/run-agent-sdk\.mjs --agent-sequence context-explorer,code-reviewer --dry-run") {
+  Write-Error "Expected workflow to validate provider sequence dry-run."
 }
 if ($workflowContent -notmatch "claude plugin validate \.") {
   Write-Error "Expected workflow to validate marketplace manifest."
