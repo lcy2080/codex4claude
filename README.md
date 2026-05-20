@@ -123,11 +123,11 @@ Recommended flow:
 
 ## Slash Commands
 
-- `/codex-harness:plan <task>` or `/plan <task>`: Build a scoped implementation plan. Uses `opus` with `xhigh` effort.
-- `/codex-harness:implement <task>` or `/implement <task>`: Make a focused change and verify it. Uses `sonnet` with `medium` effort.
-- `/codex-harness:review <scope>` or `/review <scope>`: Review changes in a findings-first style. Uses `opus` with `xhigh` effort.
-- `/codex-harness:verify <scope>` or `/verify <scope>`: Map explicit requirements to actual evidence. Uses `opus` with `xhigh` effort.
-- `/codex-harness:handoff <scope>` or `/handoff <scope>`: Write a concise continuation note. Uses `haiku` with `low` effort.
+- `/codex-harness:plan <task>` or `/plan <task>`: Prefer the runner with `context-explorer`, then build a scoped implementation plan in-session if the runner is unavailable. Uses `opus` with `xhigh` effort.
+- `/codex-harness:implement <task>` or `/implement <task>`: Prefer the runner with `implementation-worker --permission-mode acceptEdits`, then make a focused change in-session if the runner is unavailable. Uses `sonnet` with `medium` effort.
+- `/codex-harness:review <scope>` or `/review <scope>`: Prefer the runner with `code-reviewer`, then review in-session if the runner is unavailable. Uses `opus` with `xhigh` effort.
+- `/codex-harness:verify <scope>` or `/verify <scope>`: Prefer the runner with `verification-auditor`, then audit in-session if the runner is unavailable. Uses `opus` with `xhigh` effort.
+- `/codex-harness:handoff <scope>` or `/handoff <scope>`: Prefer the runner with `codex-main`, then write a continuation note in-session if the runner is unavailable. Uses `haiku` with `low` effort.
 - `/codex-harness:external-agent <task>` or `/external-agent <task>`: Run the harness through the configured external SDK backend, Codex CLI backend, or Claude CLI fallback. Uses `sonnet` with `medium` effort.
 
 ## Run With Multi-Backend Agent Runner
@@ -136,7 +136,19 @@ The optional runner lets this harness use external APIs through either the Claud
 
 Claude Code Max/Pro users should leave external provider settings empty. When provider settings are missing or the SDK path fails, the runner falls back to the installed `claude` CLI with `claude -p --agent codex-harness:codex-main`, which keeps using the normal Claude Code CLI subscription/auth path instead of calling Claude Code through Agent SDK.
 
-Codex CLI users can route an agent to local `codex exec` without provider credentials. The checked-in manifest routes `implementation-worker` through Codex CLI by default.
+All role slash commands prefer `scripts/run-agent-sdk.mjs` first and let each agent's `modeEnv` select the backend. The checked-in manifest keeps every agent on `mode: "claudeCli"` by default for Max/Pro-compatible usage. Set a role mode env to `external`, `anthropic`, `openai`, or `codexCli` only when that role should leave the default Claude CLI path.
+
+Command routing:
+
+| Slash command | Runner agent | Extra runner option |
+| --- | --- | --- |
+| `/codex-harness:plan` or `/plan` | `context-explorer` | |
+| `/codex-harness:implement` or `/implement` | `implementation-worker` | `--permission-mode acceptEdits` |
+| `/codex-harness:review` or `/review` | `code-reviewer` | |
+| `/codex-harness:verify` or `/verify` | `verification-auditor` | |
+| `/codex-harness:handoff` or `/handoff` | `codex-main` | |
+
+Codex CLI users can route an agent to local `codex exec` without provider credentials by setting that agent's mode env to `codexCli`.
 
 Install the Node dependency once:
 

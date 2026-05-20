@@ -14,6 +14,16 @@ The plugin provides:
 - `output-styles/`: `Codex Harness` system-prompt overlay.
 - `settings.json`: default main-thread agent activation.
 
+Slash command routing:
+
+- `plan`: prefers `node scripts/run-agent-sdk.mjs --agent context-explorer --prompt "$ARGUMENTS"`.
+- `implement`: prefers `node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --prompt "$ARGUMENTS"`.
+- `review`: prefers `node scripts/run-agent-sdk.mjs --agent code-reviewer --prompt "$ARGUMENTS"`.
+- `verify`: prefers `node scripts/run-agent-sdk.mjs --agent verification-auditor --prompt "$ARGUMENTS"`.
+- `handoff`: prefers `node scripts/run-agent-sdk.mjs --agent codex-main --prompt "$ARGUMENTS"`.
+
+The default agent provider mode remains `claudeCli`. Set a role-specific mode env such as `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODE=codexCli`, `CODEX_HARNESS_CODE_REVIEWER_MODE=external`, `CODEX_HARNESS_CODE_REVIEWER_MODE=anthropic`, or `CODEX_HARNESS_CODE_REVIEWER_MODE=openai` only when that role should leave the default Claude CLI path. If the runner is unavailable, each command continues in the current Claude Code session and says so.
+
 Model and effort policy:
 
 - `haiku` + `low`: context lookup and handoff notes.
