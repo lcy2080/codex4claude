@@ -184,6 +184,8 @@ for expected in [
     "loadLocalEnvFiles",
     ".env.local",
     "CODEX_HARNESS_AGENT_PROVIDER_CONFIG",
+    "CODEX_HARNESS_MAX_TURNS",
+    "--max-turns <number|none>",
     "config/agent-provider.json",
     "plugins/codex-harness",
     "--agent-provider-config",

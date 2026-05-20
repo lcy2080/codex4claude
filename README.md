@@ -233,7 +233,7 @@ node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode a
 Runner option notes:
 
 - `--effort low|medium|high|xhigh|max` maps to the SDK `effort` option for reasoning depth. It is also recorded for Codex CLI dry-runs and used for Claude CLI fallback.
-- `--max-turns` limits SDK agentic turns/API round trips, not elapsed time. Use `--overall-timeout-ms` when a wall-clock stop is required.
+- `--max-turns` limits SDK agentic turns/API round trips, not elapsed time. Omit it, set `CODEX_HARNESS_MAX_TURNS=none`, or pass `--max-turns none` for no runner-imposed turn cap. Use `--overall-timeout-ms` when a wall-clock stop is required.
 - `--overall-timeout-ms` also bounds Codex CLI and Claude CLI fallback runs. Fallback streams assistant text and emits progress markers such as `[fallback-init]`, `[fallback-message-start]`, `[fallback-tool-start]`, `[fallback-tool-input]`, `[fallback-tool-result]`, `[fallback-progress]`, and `[fallback-result]`.
 - Agent SDK runs emit the same style of stream summaries with the `sdk-` prefix when `--include-partial-messages` is enabled.
 - OpenAI Agents SDK runs emit `[openai-init]`, `[openai-tool-start]`, `[openai-tool-result]`, `[openai-progress]`, and `[openai-result]`.

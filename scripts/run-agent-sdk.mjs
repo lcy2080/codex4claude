@@ -62,7 +62,7 @@ External provider options:
   --timeout-ms <number>           Sets API_TIMEOUT_MS for compatible providers.
   --overall-timeout-ms <number>   Aborts the SDK query after this many milliseconds.
                                   Also bounds Codex CLI and Claude CLI fallback runtime.
-  --max-turns <number>            Maximum SDK agentic turns.
+  --max-turns <number|none>       Maximum SDK agentic turns. Defaults to no runner-imposed turn cap.
   --max-budget-usd <number>       Maximum SDK cost before stopping.
   --permission-mode <mode>        SDK permission mode. Maps to Codex CLI sandbox/approval. Defaults to "default".
   --allowed-tools <a,b,c>         Auto-approved SDK tool names.
@@ -223,6 +223,22 @@ function parseCsv(value) {
 
 function truthy(value) {
   return value === true || value === "1" || value === "true";
+}
+
+function parseMaxTurns(args) {
+  const rawValue = getOption(args, "max-turns", "CODEX_HARNESS_MAX_TURNS");
+  if (rawValue === undefined || rawValue === "" || rawValue === null) {
+    return null;
+  }
+  const normalized = String(rawValue).trim().toLowerCase();
+  if (normalized === "none" || normalized === "unlimited" || normalized === "off" || normalized === "0") {
+    return null;
+  }
+  const maxTurns = Number.parseInt(normalized, 10);
+  if (!Number.isInteger(maxTurns) || maxTurns < 1 || String(maxTurns) !== normalized) {
+    throw new Error("--max-turns must be a positive integer, none, unlimited, off, or 0.");
+  }
+  return maxTurns;
 }
 
 function permissionEnvNameForAgent(agent) {
@@ -510,7 +526,8 @@ function printRouting(agent, provider, args) {
     resume,
     continue: continueSession,
     fallbackReason: provider.fallbackReason,
-    fallbackEligible: true
+    fallbackEligible: true,
+    maxTurns: parseMaxTurns(args)
   };
   process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
@@ -989,30 +1006,34 @@ async function runSdk(agent, prompt, provider, options) {
     throw new Error("--resume and --continue are mutually exclusive.");
   }
 
+  const queryOptions = {
+    abortController,
+    allowedTools,
+    disallowedTools,
+    cwd: options.cwd,
+    env: buildSdkEnv(provider, options.args),
+    model: provider.model,
+    effort: provider.effort ?? getOption(options.args, "effort", "CODEX_HARNESS_EFFORT"),
+    agent,
+    maxBudgetUsd: options.maxBudgetUsd,
+    includePartialMessages,
+    resume,
+    resumeSessionAt,
+    continue: continueSession,
+    plugins: [{ type: "local", path: options.pluginPath }],
+    settingSources: ["project"],
+    systemPrompt: { type: "preset", preset: "claude_code" },
+    tools: { type: "preset", preset: "claude_code" },
+    permissionMode: effectivePermissionMode(agent, options.args, options.args.__isSequence),
+    persistSession
+  };
+  if (options.maxTurns !== null) {
+    queryOptions.maxTurns = options.maxTurns;
+  }
+
   const query = sdk.query({
     prompt,
-    options: {
-      abortController,
-      allowedTools,
-      disallowedTools,
-      cwd: options.cwd,
-      env: buildSdkEnv(provider, options.args),
-      model: provider.model,
-      effort: provider.effort ?? getOption(options.args, "effort", "CODEX_HARNESS_EFFORT"),
-      agent,
-      maxTurns: options.maxTurns,
-      maxBudgetUsd: options.maxBudgetUsd,
-      includePartialMessages,
-      resume,
-      resumeSessionAt,
-      continue: continueSession,
-      plugins: [{ type: "local", path: options.pluginPath }],
-      settingSources: ["project"],
-      systemPrompt: { type: "preset", preset: "claude_code" },
-      tools: { type: "preset", preset: "claude_code" },
-      permissionMode: effectivePermissionMode(agent, options.args, options.args.__isSequence),
-      persistSession
-    }
+    options: queryOptions
   });
 
   const state = { output: "", seenPartialText: false, sawStreamEvent: false, lastTextEndsNewline: true, blocks: {} };
@@ -1724,10 +1745,7 @@ async function main() {
   const cwd = path.resolve(getOption(args, "cwd", "CODEX_HARNESS_CWD", process.cwd()));
   loadLocalEnvFiles(cwd);
   const pluginPath = path.resolve(root, getOption(args, "plugin-path", "CODEX_HARNESS_PLUGIN_PATH", "plugins/codex-harness"));
-  const maxTurns = args["max-turns"] ? Number.parseInt(args["max-turns"], 10) : undefined;
-  if (args["max-turns"] && (!Number.isInteger(maxTurns) || maxTurns < 1)) {
-    throw new Error("--max-turns must be a positive integer.");
-  }
+  const maxTurns = parseMaxTurns(args);
   const overallTimeoutMs = getOption(args, "overall-timeout-ms", "CODEX_HARNESS_OVERALL_TIMEOUT_MS")
     ? Number.parseInt(getOption(args, "overall-timeout-ms", "CODEX_HARNESS_OVERALL_TIMEOUT_MS"), 10)
     : undefined;
