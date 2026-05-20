@@ -150,11 +150,25 @@ Command routing:
 
 Codex CLI users can route an agent to local `codex exec` without provider credentials by setting that agent's mode env to `codexCli`.
 
-Install the Node dependency once:
+### Dependency Requirements
+
+Default Claude CLI fallback mode and Codex CLI mode do not require npm dependencies in the target project. A target workspace can contain only the files being worked on, such as `index.html` and `styles.css`; do not copy the runner dependencies into every work repo.
+
+External SDK modes (`anthropic`, `openai`, or `external`) need the Node dependencies from this harness package at the location where `scripts/run-agent-sdk.mjs` is executed. Install them once from this repository or from the marketplace/bundled checkout that provides the runner:
 
 ```bash
 npm install
 ```
+
+Those dependencies are declared in `package.json`: `@anthropic-ai/claude-agent-sdk`, `@openai/agents`, `openai`, and `zod`. If the SDK dependencies are missing, or if required provider environment variables are incomplete, the runner keeps the existing policy and falls back to the Claude CLI path.
+
+Run the harness-installed runner against another workspace with `--cwd`:
+
+```powershell
+node scripts/run-agent-sdk.mjs --agent implementation-worker --cwd C:\tmp\codex4claude-acacia-site-test --prompt "Create the requested files"
+```
+
+Plugin marketplace installs follow the same rule: run the runner from the harness, marketplace checkout, or bundled runner location. The target project is the `--cwd` workspace, not the place where runner npm dependencies should be installed.
 
 Use `.env.local.example` as a key-free template for local provider settings. Keep real provider URLs and credentials in your shell or ignored `.env.local` files only.
 
