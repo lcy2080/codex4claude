@@ -128,16 +128,20 @@ for agent_name in ["codex-main", "context-explorer", "implementation-worker", "c
         fail(f"Unsupported provider sdk for {agent_name}.")
     if entry.get("sdkEnv") and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", entry.get("sdkEnv")):
         fail(f"Invalid sdkEnv in provider config for {agent_name}.")
+    if entry.get("modeEnv") and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", entry.get("modeEnv")):
+        fail(f"Invalid modeEnv in provider config for {agent_name}.")
+    if entry.get("modelEnv") and not entry.get("model"):
+        fail(f"Expected provider config entry for {agent_name} to include model when modelEnv is set.")
     if entry.get("mode") == "external":
-        for env_name in [entry.get("sdkEnv"), entry.get("baseUrlEnv"), entry.get("credential", {}).get("env"), entry.get("modelEnv")]:
+        for env_name in [entry.get("sdkEnv"), entry.get("modeEnv"), entry.get("baseUrlEnv"), entry.get("credential", {}).get("env"), entry.get("modelEnv")]:
             if env_name and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", env_name):
                 fail(f"Invalid env var name in provider config for {agent_name}.")
         if entry.get("credential", {}).get("type") not in {"apiKey", "authToken"}:
             fail(f"Unsupported credential type for {agent_name}.")
-codex_cli_provider = provider_config.get("agents", {}).get("codex-implementation-worker", {})
-if codex_cli_provider.get("mode") != "codexCli":
-    fail("Expected codex-implementation-worker provider to use codexCli mode.")
-for env_name in [codex_cli_provider.get("modelEnv"), codex_cli_provider.get("codexModelEnv"), codex_cli_provider.get("codexProfileEnv")]:
+codex_cli_provider = provider_config.get("agents", {}).get("implementation-worker", {})
+if not codex_cli_provider.get("codexModelEnv") or not codex_cli_provider.get("codexProfileEnv"):
+    fail("Expected implementation-worker provider to expose Codex CLI model/profile envs.")
+for env_name in [codex_cli_provider.get("modeEnv"), codex_cli_provider.get("modelEnv"), codex_cli_provider.get("codexModelEnv"), codex_cli_provider.get("codexProfileEnv")]:
     if env_name and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", env_name):
         fail("Invalid Codex CLI env var name in provider config.")
 codex_main_provider = provider_config.get("agents", {}).get("codex-main", {})
@@ -166,6 +170,16 @@ for expected in [
     "CODEX_HARNESS_BASE_URL",
     "CODEX_HARNESS_SDK",
     "CODEX_HARNESS_CODE_REVIEWER_SDK",
+    "CODEX_HARNESS_IMPLEMENTATION_WORKER_MODE",
+    "CODEX_HARNESS_CONTEXT_EXPLORER_PERMISSION_MODE",
+    "CODEX_HARNESS_IMPLEMENTATION_WORKER_PERMISSION_MODE",
+    "CODEX_HARNESS_CODE_REVIEWER_PERMISSION_MODE",
+    "CODEX_HARNESS_VERIFICATION_AUDITOR_PERMISSION_MODE",
+    "SEQUENCE_ROLE_PERMISSION_PRESETS",
+    "effectivePermissionMode",
+    "cleanupCodexProcessTree",
+    "[codex-cleanup-warning]",
+    "modeEnv",
     "sdkEnv",
     "CODEX_HARNESS_AGENT_PROVIDER_CONFIG",
     "plugins/codex-harness",

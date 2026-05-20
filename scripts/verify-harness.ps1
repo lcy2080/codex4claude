@@ -119,8 +119,14 @@ foreach ($agentName in $requiredProviderAgents) {
   if ($entry.sdkEnv -and $entry.sdkEnv -notmatch "^[A-Za-z_][A-Za-z0-9_]*$") {
     Write-Error "Invalid sdkEnv in provider config for $agentName."
   }
+  if ($entry.modeEnv -and $entry.modeEnv -notmatch "^[A-Za-z_][A-Za-z0-9_]*$") {
+    Write-Error "Invalid modeEnv in provider config for $agentName."
+  }
+  if ($entry.modelEnv -and -not $entry.model) {
+    Write-Error "Expected provider config entry for $agentName to include model when modelEnv is set."
+  }
   if ($entry.mode -eq "external") {
-    $envFields = @($entry.sdkEnv, $entry.baseUrlEnv, $entry.credential.env, $entry.modelEnv) | Where-Object { $_ }
+    $envFields = @($entry.sdkEnv, $entry.modeEnv, $entry.baseUrlEnv, $entry.credential.env, $entry.modelEnv) | Where-Object { $_ }
     foreach ($envName in $envFields) {
       if ($envName -notmatch "^[A-Za-z_][A-Za-z0-9_]*$") {
         Write-Error "Invalid env var name in provider config for $agentName."
@@ -131,11 +137,11 @@ foreach ($agentName in $requiredProviderAgents) {
     }
   }
 }
-$codexCliProvider = $providerConfig.agents."codex-implementation-worker"
-if (-not $codexCliProvider -or $codexCliProvider.mode -ne "codexCli") {
-  Write-Error "Expected codex-implementation-worker provider to use codexCli mode."
+$codexCliProvider = $providerConfig.agents."implementation-worker"
+if (-not $codexCliProvider -or -not $codexCliProvider.codexModelEnv -or -not $codexCliProvider.codexProfileEnv) {
+  Write-Error "Expected implementation-worker provider to expose Codex CLI model/profile envs."
 }
-$codexCliEnvFields = @($codexCliProvider.modelEnv, $codexCliProvider.codexModelEnv, $codexCliProvider.codexProfileEnv) | Where-Object { $_ }
+$codexCliEnvFields = @($codexCliProvider.modeEnv, $codexCliProvider.modelEnv, $codexCliProvider.codexModelEnv, $codexCliProvider.codexProfileEnv) | Where-Object { $_ }
 foreach ($envName in $codexCliEnvFields) {
   if ($envName -notmatch "^[A-Za-z_][A-Za-z0-9_]*$") {
     Write-Error "Invalid Codex CLI env var name in provider config."
@@ -170,6 +176,16 @@ $sdkRunnerExpected = @(
   "CODEX_HARNESS_BASE_URL",
   "CODEX_HARNESS_SDK",
   "CODEX_HARNESS_CODE_REVIEWER_SDK",
+  "CODEX_HARNESS_IMPLEMENTATION_WORKER_MODE",
+  "CODEX_HARNESS_CONTEXT_EXPLORER_PERMISSION_MODE",
+  "CODEX_HARNESS_IMPLEMENTATION_WORKER_PERMISSION_MODE",
+  "CODEX_HARNESS_CODE_REVIEWER_PERMISSION_MODE",
+  "CODEX_HARNESS_VERIFICATION_AUDITOR_PERMISSION_MODE",
+  "SEQUENCE_ROLE_PERMISSION_PRESETS",
+  "effectivePermissionMode",
+  "cleanupCodexProcessTree",
+  "[codex-cleanup-warning]",
+  "modeEnv",
   "sdkEnv",
   "CODEX_HARNESS_AGENT_PROVIDER_CONFIG",
   "plugins/codex-harness",

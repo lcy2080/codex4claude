@@ -3,6 +3,7 @@
     "codex-main": {
       "sdk": "anthropic",
       "sdkEnv": "CODEX_HARNESS_CODEX_MAIN_SDK",
+      "modeEnv": "CODEX_HARNESS_CODEX_MAIN_MODE",
       "mode": "claudeCli",
       "claudeAgent": "codex-harness:codex-main",
       "model": "sonnet",
@@ -11,29 +12,32 @@
     "context-explorer": {
       "sdk": "anthropic",
       "sdkEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_SDK",
-      "mode": "external",
+      "modeEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_MODE",
+      "mode": "claudeCli",
       "baseUrlEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL",
       "credential": {
         "type": "apiKey",
         "env": "CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY"
       },
+      "model": "haiku",
       "modelEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_MODEL",
+      "codexModelEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_CODEX_MODEL",
+      "codexProfileEnv": "CODEX_HARNESS_CONTEXT_EXPLORER_CODEX_PROFILE",
       "fallbackModel": "haiku",
       "effort": "low"
     },
     "implementation-worker": {
-      "mode": "codexCli",
-      "model": "gpt-5.2",
-      "modelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL",
-      "codexProfileEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_PROFILE",
-      "codexModelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL",
-      "fallbackModel": "sonnet",
-      "effort": "medium"
-    },
-    "codex-implementation-worker": {
-      "mode": "codexCli",
-      "model": "gpt-5.2",
-      "modelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL",
+      "sdk": "anthropic",
+      "sdkEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_SDK",
+      "modeEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_MODE",
+      "mode": "claudeCli",
+      "baseUrlEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL",
+      "credential": {
+        "type": "apiKey",
+        "env": "CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY"
+      },
+      "model": "sonnet",
+      "modelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL",
       "codexProfileEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_PROFILE",
       "codexModelEnv": "CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL",
       "fallbackModel": "sonnet",
@@ -42,26 +46,33 @@
     "code-reviewer": {
       "sdk": "anthropic",
       "sdkEnv": "CODEX_HARNESS_CODE_REVIEWER_SDK",
-      "mode": "external",
+      "modeEnv": "CODEX_HARNESS_CODE_REVIEWER_MODE",
+      "mode": "claudeCli",
       "baseUrlEnv": "CODEX_HARNESS_CODE_REVIEWER_BASE_URL",
       "credential": {
         "type": "apiKey",
         "env": "CODEX_HARNESS_CODE_REVIEWER_API_KEY"
       },
+      "model": "sonnet",
       "modelEnv": "CODEX_HARNESS_CODE_REVIEWER_MODEL",
+      "codexModelEnv": "CODEX_HARNESS_CODE_REVIEWER_CODEX_MODEL",
+      "codexProfileEnv": "CODEX_HARNESS_CODE_REVIEWER_CODEX_PROFILE",
       "fallbackModel": "sonnet",
       "effort": "high"
     },
     "verification-auditor": {
       "sdk": "anthropic",
       "sdkEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_SDK",
-      "mode": "external",
+      "modeEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_MODE",
+      "mode": "claudeCli",
       "baseUrlEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL",
       "credential": {
         "type": "apiKey",
         "env": "CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY"
       },
       "modelEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL",
+      "codexModelEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_CODEX_MODEL",
+      "codexProfileEnv": "CODEX_HARNESS_VERIFICATION_AUDITOR_CODEX_PROFILE",
       "model": "opus",
       "fallbackModel": "opus",
       "effort": "max"

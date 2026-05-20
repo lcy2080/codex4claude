@@ -208,6 +208,7 @@ Runner option notes:
 - Codex CLI runs spawn `codex exec` and emit `[codex-init]`, `[codex-progress]`, `[codex-tool-start]`, `[codex-tool-result]`, and `[codex-result]`.
 - OpenAI mode exposes `Read`, `LS`, `Glob`, and `Grep` by default. `Edit`, `MultiEdit`, and `Write` require `--permission-mode acceptEdits` or a manifest `allowWrite: true`. `Bash` requires `--allowed-tools Bash` or manifest `allowBash: true`, and still runs through timeout, cwd, output-cap, and destructive-command checks.
 - Codex CLI mode maps `--permission-mode default` to `--sandbox read-only --ask-for-approval on-request`, `acceptEdits` to `--sandbox workspace-write --ask-for-approval on-request`, and `bypassPermissions` to `--sandbox workspace-write --ask-for-approval never`. It does not automatically use `danger-full-access`.
+- In sequence runs, role presets keep `context-explorer`, `code-reviewer`, and `verification-auditor` on `permissionMode=default`; `implementation-worker` keeps the requested `--permission-mode`. Override a role with `CODEX_HARNESS_CONTEXT_EXPLORER_PERMISSION_MODE`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_PERMISSION_MODE`, `CODEX_HARNESS_CODE_REVIEWER_PERMISSION_MODE`, or `CODEX_HARNESS_VERIFICATION_AUDITOR_PERMISSION_MODE`.
 - `--allowed-tools` and `--disallowed-tools` have no direct Codex CLI equivalent and are not applied by the Codex CLI backend.
 - Read-only review runs that inspect multiple files can need more turns than small probes. Use `--max-turns 12` to `--max-turns 20` for provider smoke tests that require `LS`, `Glob`, `Read`, and final synthesis.
 - Thinking stream events are only marked as `[sdk-thinking]` or `[fallback-thinking]`; hidden reasoning text is not printed.
@@ -223,17 +224,17 @@ The runner only receives the environment variable name, not the credential value
 
 ## Agent-Specific Provider Routing
 
-Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials. External entries can set `sdk` to `anthropic` or `openai`, and should also name an optional `sdkEnv` so `.env` files can declare the protocol next to the base URL/model/key. SDK selection priority is `--sdk`, then agent-specific `sdkEnv`, then `CODEX_HARNESS_SDK`, then manifest `sdk`, then `anthropic`. Codex CLI entries use `mode: "codexCli"` and do not require a base URL or credential.
+Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials. Each entry can name a `modeEnv` so `.env` files can select the backend per agent without editing JSON. Supported mode env values are `claudeCli`, `codexCli`, `anthropic`, `openai`, and `external`. `anthropic` and `openai` are aliases for `mode: "external"` plus the matching SDK. External entries can also name an optional `sdkEnv` so `.env` files can declare the protocol next to the base URL/model/key. SDK selection priority is `--sdk`, then an `anthropic`/`openai` mode env alias, then agent-specific `sdkEnv`, then `CODEX_HARNESS_SDK`, then manifest `sdk`, then `anthropic`. Codex CLI entries use `mode: "codexCli"` and do not require a base URL or credential.
 
 Default routing:
 
-| Agent | Default SDK/mode | Required env vars for external mode |
-| --- | --- | --- |
-| `codex-main` | Anthropic / Claude CLI | None |
-| `context-explorer` | Anthropic / external when configured, otherwise main Claude CLI fallback with `haiku`/`low` | `CODEX_HARNESS_CONTEXT_EXPLORER_SDK`, `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
-| `implementation-worker` | Codex CLI / local `codex exec` | Optional `CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_PROFILE` |
-| `code-reviewer` | Anthropic / external when configured, otherwise main Claude CLI fallback with `sonnet`/`high` | `CODEX_HARNESS_CODE_REVIEWER_SDK`, `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
-| `verification-auditor` | Anthropic / external when configured, otherwise main Claude CLI fallback with `opus`/`max` | `CODEX_HARNESS_VERIFICATION_AUDITOR_SDK`, `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
+| Agent | Default SDK/mode | Backend selector env | Required env vars for external mode |
+| --- | --- | --- | --- |
+| `codex-main` | Anthropic / Claude CLI | `CODEX_HARNESS_CODEX_MAIN_MODE` | None |
+| `context-explorer` | Anthropic / external when configured, otherwise main Claude CLI fallback with `haiku`/`low` | `CODEX_HARNESS_CONTEXT_EXPLORER_MODE` | `CODEX_HARNESS_CONTEXT_EXPLORER_SDK`, `CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL`, `CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY`, `CODEX_HARNESS_CONTEXT_EXPLORER_MODEL` |
+| `implementation-worker` | Codex CLI / local `codex exec` | `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODE` | `CODEX_HARNESS_IMPLEMENTATION_WORKER_SDK`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL`; for Codex CLI use optional `CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_MODEL`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_CODEX_PROFILE` |
+| `code-reviewer` | Anthropic / external when configured, otherwise main Claude CLI fallback with `sonnet`/`high` | `CODEX_HARNESS_CODE_REVIEWER_MODE` | `CODEX_HARNESS_CODE_REVIEWER_SDK`, `CODEX_HARNESS_CODE_REVIEWER_BASE_URL`, `CODEX_HARNESS_CODE_REVIEWER_API_KEY`, `CODEX_HARNESS_CODE_REVIEWER_MODEL` |
+| `verification-auditor` | Anthropic / external when configured, otherwise main Claude CLI fallback with `opus`/`max` | `CODEX_HARNESS_VERIFICATION_AUDITOR_MODE` | `CODEX_HARNESS_VERIFICATION_AUDITOR_SDK`, `CODEX_HARNESS_VERIFICATION_AUDITOR_BASE_URL`, `CODEX_HARNESS_VERIFICATION_AUDITOR_API_KEY`, `CODEX_HARNESS_VERIFICATION_AUDITOR_MODEL` |
 
 For Max/Pro-compatible usage, leave those provider env vars unset. The dry-run output should show `mode` as `claudeCli`, `fallbackAgent` as `codex-harness:codex-main`, and include `fallbackReason`.
 
@@ -247,6 +248,7 @@ Configure one agent on Linux or macOS. If all required provider env vars are set
 
 ```bash
 export CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL="https://provider.example/anthropic"
+export CODEX_HARNESS_CONTEXT_EXPLORER_MODE="anthropic"
 export CODEX_HARNESS_CONTEXT_EXPLORER_SDK="anthropic"
 export CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_CONTEXT_EXPLORER_MODEL="provider-small"
@@ -257,6 +259,7 @@ Configure one agent on PowerShell:
 
 ```powershell
 $env:CODEX_HARNESS_CODE_REVIEWER_BASE_URL = "https://provider.example/anthropic"
+$env:CODEX_HARNESS_CODE_REVIEWER_MODE = "anthropic"
 $env:CODEX_HARNESS_CODE_REVIEWER_SDK = "anthropic"
 $env:CODEX_HARNESS_CODE_REVIEWER_API_KEY = "set-in-your-shell"
 $env:CODEX_HARNESS_CODE_REVIEWER_MODEL = "provider-review-model"
@@ -278,6 +281,7 @@ Or configure it per agent in `config/agent-providers.json`:
 {
   "sdk": "openai",
   "sdkEnv": "OPENAI_COMPAT_SDK",
+  "modeEnv": "OPENAI_COMPAT_MODE",
   "mode": "external",
   "baseUrlEnv": "OPENAI_COMPAT_BASE_URL",
   "credential": { "type": "apiKey", "env": "OPENAI_COMPAT_API_KEY" },
@@ -300,20 +304,31 @@ Configure a Codex CLI backend per agent without API credentials:
 }
 ```
 
+Or switch an existing manifest entry at runtime with only an environment variable:
+
+```bash
+export CODEX_HARNESS_IMPLEMENTATION_WORKER_MODE="codexCli"
+export CODEX_HARNESS_CODE_REVIEWER_MODE="openai"
+export CODEX_HARNESS_VERIFICATION_AUDITOR_MODE="claudeCli"
+```
+
 Configure different providers per agent by setting different env var groups:
 
 ```bash
 export CODEX_HARNESS_CONTEXT_EXPLORER_BASE_URL="https://provider-a.example/anthropic"
+export CODEX_HARNESS_CONTEXT_EXPLORER_MODE="anthropic"
 export CODEX_HARNESS_CONTEXT_EXPLORER_SDK="anthropic"
 export CODEX_HARNESS_CONTEXT_EXPLORER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_CONTEXT_EXPLORER_MODEL="provider-a-small"
 
 export CODEX_HARNESS_IMPLEMENTATION_WORKER_BASE_URL="https://provider-b.example/anthropic"
+export CODEX_HARNESS_IMPLEMENTATION_WORKER_MODE="anthropic"
 export CODEX_HARNESS_IMPLEMENTATION_WORKER_SDK="anthropic"
 export CODEX_HARNESS_IMPLEMENTATION_WORKER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_IMPLEMENTATION_WORKER_MODEL="provider-b-coder"
 
 export CODEX_HARNESS_CODE_REVIEWER_BASE_URL="https://provider-c.example/anthropic"
+export CODEX_HARNESS_CODE_REVIEWER_MODE="anthropic"
 export CODEX_HARNESS_CODE_REVIEWER_SDK="anthropic"
 export CODEX_HARNESS_CODE_REVIEWER_API_KEY="set-in-your-shell"
 export CODEX_HARNESS_CODE_REVIEWER_MODEL="provider-c-review"
@@ -334,6 +349,8 @@ node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-
 ```
 
 Each dry-run line is sanitized. It shows the selected `agent`, `sdk`, `mode`, `model`, `effort`, main CLI fallback target, configured env var names including `sdkEnv`, Codex profile/model env names, Codex sandbox/approval mapping, OpenAI write/Bash tool exposure, and fallback reason when one applies. It never prints credential values.
+
+In sequence dry-runs, the printed `permissionMode`, `writeTools`, `bashTool`, `sandbox`, and `approvalPolicy` are the effective per-agent values after role presets and agent-specific permission env overrides.
 
 The fallback prompt is sent back through the main harness agent, not through an external subagent. It includes the requested agent name, the sanitized fallback reason, and the original task so the main Claude Code CLI session can apply the same role and complexity policy. If an Opus fallback run fails because the account needs usage credits for 1M context, the runner retries once with `sonnet` and `high` effort for standard-context compatibility.
 

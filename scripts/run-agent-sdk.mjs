@@ -21,6 +21,18 @@ const DEFAULT_AGENT_FALLBACKS = {
   "code-reviewer": { model: "sonnet", effort: "high" },
   "verification-auditor": { model: "opus", effort: "max" }
 };
+const SEQUENCE_ROLE_PERMISSION_PRESETS = {
+  "context-explorer": "default",
+  "code-reviewer": "default",
+  "verification-auditor": "default"
+};
+const AGENT_PERMISSION_ENVS = {
+  "context-explorer": "CODEX_HARNESS_CONTEXT_EXPLORER_PERMISSION_MODE",
+  "implementation-worker": "CODEX_HARNESS_IMPLEMENTATION_WORKER_PERMISSION_MODE",
+  "code-reviewer": "CODEX_HARNESS_CODE_REVIEWER_PERMISSION_MODE",
+  "verification-auditor": "CODEX_HARNESS_VERIFICATION_AUDITOR_PERMISSION_MODE"
+};
+const activeCodexChildren = new Set();
 
 const HELP = `Usage:
   node scripts/run-agent-sdk.mjs --prompt <text> [--agent <name>] [options]
@@ -73,10 +85,16 @@ Claude CLI fallback:
 Codex CLI backend:
   Agents with mode "codexCli" run local codex exec with --sandbox and --ask-for-approval
   mapped from --permission-mode. --allowed-tools and --disallowed-tools are not applied.
+  In --agent-sequence runs, role permission presets keep context-explorer, code-reviewer,
+  and verification-auditor read-only by default; implementation-worker keeps the requested
+  --permission-mode unless an agent-specific permission env overrides it.
 
 Environment fallbacks:
   CODEX_HARNESS_SDK
   Agent manifests can also name per-agent sdkEnv values such as CODEX_HARNESS_CODE_REVIEWER_SDK.
+  Agent manifests can name per-agent modeEnv values such as CODEX_HARNESS_CODE_REVIEWER_MODE.
+  Example per-agent mode env: CODEX_HARNESS_IMPLEMENTATION_WORKER_MODE.
+  Mode env values: claudeCli, codexCli, anthropic, openai, external.
   CODEX_HARNESS_AGENT_PROVIDER_CONFIG
   CODEX_HARNESS_BASE_URL
   CODEX_HARNESS_API_KEY_ENV
@@ -98,6 +116,10 @@ Environment fallbacks:
   CODEX_HARNESS_RESUME_SESSION_AT
   CODEX_HARNESS_CONTINUE
   CODEX_HARNESS_PERMISSION_MODE
+  CODEX_HARNESS_CONTEXT_EXPLORER_PERMISSION_MODE
+  CODEX_HARNESS_IMPLEMENTATION_WORKER_PERMISSION_MODE
+  CODEX_HARNESS_CODE_REVIEWER_PERMISSION_MODE
+  CODEX_HARNESS_VERIFICATION_AUDITOR_PERMISSION_MODE
   CODEX_HARNESS_PROMPT
 `;
 
@@ -157,6 +179,27 @@ function truthy(value) {
   return value === true || value === "1" || value === "true";
 }
 
+function permissionEnvNameForAgent(agent) {
+  return AGENT_PERMISSION_ENVS[agent];
+}
+
+function effectivePermissionMode(agent, args, isSequence = false) {
+  const agentEnvName = permissionEnvNameForAgent(agent);
+  const agentEnvValue = agentEnvName ? process.env[agentEnvName] : undefined;
+  if (agentEnvValue) {
+    return agentEnvValue;
+  }
+  if (isSequence && SEQUENCE_ROLE_PERMISSION_PRESETS[agent]) {
+    return SEQUENCE_ROLE_PERMISSION_PRESETS[agent];
+  }
+  return getOption(args, "permission-mode", "CODEX_HARNESS_PERMISSION_MODE", "default");
+}
+
+function hasSequenceReadOnlyPreset(agent, args) {
+  const agentEnvName = permissionEnvNameForAgent(agent);
+  return Boolean(args.__isSequence && SEQUENCE_ROLE_PERMISSION_PRESETS[agent] && !(agentEnvName && process.env[agentEnvName]));
+}
+
 function assertEnvName(name, fieldName) {
   if (!name) {
     return;
@@ -178,9 +221,28 @@ function assertSdk(sdk, agent) {
   }
 }
 
-function sdkForEntry(agent, entry = {}, args = {}) {
+function backendForEntry(agent, entry = {}) {
+  assertEnvName(entry.modeEnv, `${agent}.modeEnv`);
+  const rawMode = envValueFromName(entry.modeEnv) ?? entry.mode ?? "claudeCli";
+  const normalized = String(rawMode).trim().toLowerCase();
+  if (normalized === "anthropic" || normalized === "openai") {
+    return { mode: "external", sdk: normalized };
+  }
+  if (normalized === "external") {
+    return { mode: "external" };
+  }
+  if (normalized === "claudecli" || normalized === "claude-cli") {
+    return { mode: "claudeCli" };
+  }
+  if (normalized === "codexcli" || normalized === "codex-cli") {
+    return { mode: "codexCli" };
+  }
+  throw new Error(`Agent ${agent} has unsupported provider mode: ${rawMode}`);
+}
+
+function sdkForEntry(agent, entry = {}, args = {}, backendSdk) {
   assertEnvName(entry.sdkEnv, `${agent}.sdkEnv`);
-  const sdk = args.sdk ?? envValueFromName(entry.sdkEnv) ?? process.env.CODEX_HARNESS_SDK ?? entry.sdk ?? DEFAULT_SDK;
+  const sdk = args.sdk ?? backendSdk ?? envValueFromName(entry.sdkEnv) ?? process.env.CODEX_HARNESS_SDK ?? entry.sdk ?? DEFAULT_SDK;
   assertSdk(sdk, agent);
   return sdk;
 }
@@ -230,9 +292,10 @@ function providerFromManifest(agent, config, args = {}) {
       fallback: fallbackPolicyForAgent(agent)
     };
   }
-  const mode = entry.mode ?? "claudeCli";
+  const backend = backendForEntry(agent, entry);
+  const mode = backend.mode;
   assertMode(mode, agent);
-  const sdk = sdkForEntry(agent, entry, args);
+  const sdk = sdkForEntry(agent, entry, args, backend.sdk);
   const fallback = fallbackPolicyForAgent(agent, entry);
   if (mode === "codexCli") {
     assertEnvName(entry.modelEnv, `${agent}.modelEnv`);
@@ -360,6 +423,8 @@ function printRouting(agent, provider, args) {
   const fallback = provider.fallback ?? fallbackPolicyForAgent(agent, provider.entry, args);
   const resume = getOption(args, "resume", "CODEX_HARNESS_RESUME");
   const continueSession = truthy(args.continue) || truthy(process.env.CODEX_HARNESS_CONTINUE);
+  const permissionMode = effectivePermissionMode(agent, args, args.__isSequence);
+  const codexMapping = provider.mode === "codexCli" ? codexCliPermissionMapping(permissionMode) : undefined;
   const payload = {
     agent,
     mode: provider.mode,
@@ -370,15 +435,18 @@ function printRouting(agent, provider, args) {
     fallbackModel: fallback.model,
     fallbackEffort: fallback.effort,
     sdkEnv: provider.entry?.sdkEnv,
+    modeEnv: provider.entry?.modeEnv,
     baseUrlEnv: provider.entry?.baseUrlEnv,
     credentialType: provider.credentialType ?? provider.entry?.credential?.type,
     credentialEnv: provider.credentialEnv ?? provider.entry?.credential?.env,
-    writeTools: provider.mode === "codexCli" ? false : canExposeWriteTools(provider, args),
-    bashTool: provider.mode === "codexCli" ? false : canExposeBashTool(provider, args),
+    permissionMode,
+    permissionModeEnv: permissionEnvNameForAgent(agent),
+    writeTools: provider.mode === "codexCli" ? false : canExposeWriteTools(provider, args, agent),
+    bashTool: provider.mode === "codexCli" ? false : canExposeBashTool(provider, args, agent),
     codexProfileEnv: provider.codexProfileEnv ?? provider.entry?.codexProfileEnv,
     codexModelEnv: provider.codexModelEnv ?? provider.entry?.codexModelEnv,
-    sandbox: provider.mode === "codexCli" ? codexCliPermissionMapping(args).sandbox : undefined,
-    approvalPolicy: provider.mode === "codexCli" ? codexCliPermissionMapping(args).approvalPolicy : undefined,
+    sandbox: codexMapping?.sandbox,
+    approvalPolicy: codexMapping?.approvalPolicy,
     toolPolicyNote: provider.mode === "codexCli" ? "--allowed-tools and --disallowed-tools are not applied by the Codex CLI backend" : undefined,
     persistSession: shouldPersistOpenAiSession(args),
     resume,
@@ -397,8 +465,7 @@ function sanitizeReason(reason, provider) {
   return text.replace(/\s+/g, " ").slice(0, 500);
 }
 
-function codexCliPermissionMapping(args) {
-  const permissionMode = getOption(args, "permission-mode", "CODEX_HARNESS_PERMISSION_MODE", "default");
+function codexCliPermissionMapping(permissionMode) {
   if (permissionMode === "acceptEdits") {
     return { sandbox: "workspace-write", approvalPolicy: "on-request" };
   }
@@ -443,12 +510,18 @@ function openAiAllowedSet(args) {
   return new Set(parseCsv(getOption(args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS")) ?? []);
 }
 
-function canExposeWriteTools(provider, args) {
-  const permissionMode = getOption(args, "permission-mode", "CODEX_HARNESS_PERMISSION_MODE", "default");
+function canExposeWriteTools(provider, args, agent) {
+  if (hasSequenceReadOnlyPreset(agent, args)) {
+    return false;
+  }
+  const permissionMode = effectivePermissionMode(agent, args, args.__isSequence);
   return permissionMode === "acceptEdits" || permissionMode === "bypassPermissions" || provider.entry?.allowWrite === true;
 }
 
-function canExposeBashTool(provider, args) {
+function canExposeBashTool(provider, args, agent) {
+  if (hasSequenceReadOnlyPreset(agent, args)) {
+    return false;
+  }
   const allowed = openAiAllowedSet(args);
   return allowed.has("Bash") || allowed.has("bash") || provider.entry?.allowBash === true;
 }
@@ -553,7 +626,7 @@ function logOpenAiTool(kind, name, detail = "") {
   process.stderr.write(`[openai-tool-${kind}] ${name}${detail ? ` ${detail}` : ""}\n`);
 }
 
-async function createOpenAiTools(options, provider) {
+async function createOpenAiTools(options, provider, agentName) {
   const [{ tool }, { z }] = await Promise.all([import("@openai/agents"), import("zod")]);
   const workspaceRoot = await fs.promises.realpath(options.cwd);
   const tools = [];
@@ -646,7 +719,7 @@ async function createOpenAiTools(options, provider) {
     return matches.join("\n");
   });
 
-  if (canExposeWriteTools(provider, options.args)) {
+  if (canExposeWriteTools(provider, options.args, agentName)) {
     addTool("Edit", "Replace existing text in a workspace file after verifying the old text is present.", z.object({
       file_path: z.string(),
       old_string: z.string(),
@@ -697,7 +770,7 @@ async function createOpenAiTools(options, provider) {
     });
   }
 
-  if (canExposeBashTool(provider, options.args)) {
+  if (canExposeBashTool(provider, options.args, agentName)) {
     addTool("Bash", "Run an approved command in the workspace root with timeout and output caps.", z.object({
       command: z.string(),
       timeout_ms: z.number().int().min(1000).max(120000).optional()
@@ -879,7 +952,7 @@ async function runSdk(agent, prompt, provider, options) {
       settingSources: ["project"],
       systemPrompt: { type: "preset", preset: "claude_code" },
       tools: { type: "preset", preset: "claude_code" },
-      permissionMode: getOption(options.args, "permission-mode", "CODEX_HARNESS_PERMISSION_MODE", "default"),
+      permissionMode: effectivePermissionMode(agent, options.args, options.args.__isSequence),
       persistSession
     }
   });
@@ -1071,7 +1144,7 @@ async function runOpenAiSdk(agentName, prompt, provider, options) {
   const timeout = abortController
     ? setTimeout(() => abortController.abort(), options.overallTimeoutMs)
     : undefined;
-  const tools = await createOpenAiTools(options, provider);
+  const tools = await createOpenAiTools(options, provider, agentName);
   const modelProvider = buildOpenAiProvider(sdk, provider);
   const sessionConfig = await resolveOpenAiSessionConfig(agentName, options, sdk);
   sdk.setTracingDisabled(!truthy(process.env.CODEX_HARNESS_OPENAI_TRACING));
@@ -1176,6 +1249,54 @@ function handleCliStreamLine(line, state) {
 
 function shouldRetryStandardContext(error, model) {
   return model === "opus" && /Usage credits required|1M context|standard context/i.test(error.message);
+}
+
+function cleanupWarning(reason, error) {
+  process.stderr.write(`[codex-cleanup-warning] reason=${reason} error=${String(error?.message ?? error)}\n`);
+}
+
+function cleanupCodexProcessTree(child, reason) {
+  if (!child?.pid || child.killed) {
+    return Promise.resolve();
+  }
+  if (process.platform === "win32") {
+    return new Promise((resolve) => {
+      const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true
+      });
+      killer.on("error", (error) => {
+        cleanupWarning(reason, error);
+        resolve();
+      });
+      killer.on("close", (code) => {
+        if (code !== 0) {
+          cleanupWarning(reason, `taskkill exited with code ${code}`);
+        }
+        resolve();
+      });
+    });
+  }
+
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch (error) {
+    cleanupWarning(reason, error);
+  }
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // Process group already exited.
+      }
+      resolve();
+    }, 1000);
+  });
+}
+
+async function cleanupActiveCodexChildren(reason) {
+  await Promise.all([...activeCodexChildren].map((child) => cleanupCodexProcessTree(child, reason)));
 }
 
 function spawnClaudeCli(cliArgs, options) {
@@ -1321,9 +1442,12 @@ function spawnCodexCli(cliArgs, options) {
     const child = spawn(codexCommand.command, codexCommand.args, {
       cwd: options.cwd,
       env: process.env,
+      detached: process.platform !== "win32",
       shell: false,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
     });
+    activeCodexChildren.add(child);
     const state = { output: "", failure: undefined, sawInit: false };
     let stdout = "";
     let stderr = "";
@@ -1335,7 +1459,7 @@ function spawnCodexCli(cliArgs, options) {
     const timeout = options.overallTimeoutMs
       ? setTimeout(() => {
           process.stderr.write(`[codex-timeout] elapsedMs=${Date.now() - startedAt} limitMs=${options.overallTimeoutMs}\n`);
-          child.kill();
+          void cleanupCodexProcessTree(child, "timeout");
         }, options.overallTimeoutMs)
       : undefined;
     child.stdout.on("data", (chunk) => {
@@ -1353,8 +1477,12 @@ function spawnCodexCli(cliArgs, options) {
       stderr += text;
       process.stderr.write(text);
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      activeCodexChildren.delete(child);
+      reject(error);
+    });
     child.on("close", (code) => {
+      activeCodexChildren.delete(child);
       clearInterval(progress);
       if (timeout) {
         clearTimeout(timeout);
@@ -1379,9 +1507,9 @@ function resolveCodexCommand(cliArgs) {
   if (process.platform !== "win32") {
     return { command: "codex", args: cliArgs };
   }
-  const npmCodexPs1 = process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "codex.ps1") : undefined;
-  if (npmCodexPs1 && fs.existsSync(npmCodexPs1)) {
-    return { command: "pwsh", args: ["-File", npmCodexPs1, ...cliArgs] };
+  const npmCodexJs = process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "node_modules", "@openai", "codex", "bin", "codex.js") : undefined;
+  if (npmCodexJs && fs.existsSync(npmCodexJs)) {
+    return { command: process.execPath, args: [npmCodexJs, ...cliArgs] };
   }
   return { command: "codex", args: cliArgs };
 }
@@ -1397,7 +1525,7 @@ async function runCodexCli(agent, prompt, provider, options) {
     throw new Error("--resume-session-at is not supported by the Codex CLI backend.");
   }
 
-  const { sandbox, approvalPolicy } = codexCliPermissionMapping(options.args);
+  const { sandbox, approvalPolicy } = codexCliPermissionMapping(effectivePermissionMode(agent, options.args, options.args.__isSequence));
   const model = provider.model ?? getOption(options.args, "model", "CODEX_HARNESS_MODEL", "sonnet");
   const cliArgs = [
     "--ask-for-approval",
@@ -1429,7 +1557,7 @@ async function runClaudeCli(agent, prompt, provider, options, reason) {
   const effort = fallback.effort;
   const cliAgent = fallback.agent;
   const fallbackPrompt = buildFallbackPrompt(agent, prompt, provider, reason);
-  const permissionMode = getOption(options.args, "permission-mode", "CODEX_HARNESS_PERMISSION_MODE", "default");
+  const permissionMode = effectivePermissionMode(agent, options.args, options.args.__isSequence);
   const allowedTools = getOption(options.args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS");
   const disallowedTools = getOption(options.args, "disallowed-tools", "CODEX_HARNESS_DISALLOWED_TOOLS");
   const cliArgs = [
@@ -1560,6 +1688,7 @@ async function main() {
   if (agents.length === 0) {
     throw new Error("--agent-sequence must include at least one agent.");
   }
+  args.__isSequence = agents.length > 1;
 
   const options = { args, cwd, pluginPath, maxTurns, maxBudgetUsd, overallTimeoutMs };
   const outputs = [];
@@ -1579,7 +1708,21 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, async () => {
+    await cleanupActiveCodexChildren(signal);
+    process.exit(128 + (signal === "SIGINT" ? 2 : 15));
+  });
+}
+
+process.once("uncaughtException", async (error) => {
+  process.stderr.write(`Error: ${error.message}\n`);
+  await cleanupActiveCodexChildren("uncaughtException");
+  process.exit(1);
+});
+
+main().catch(async (error) => {
+  await cleanupActiveCodexChildren("mainError");
   process.stderr.write(`Error: ${error.message}\n`);
   process.exitCode = 1;
 });
