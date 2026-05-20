@@ -1453,6 +1453,9 @@ function codexEventText(message) {
   if (typeof message.final_output === "string") {
     return message.final_output;
   }
+  if (typeof message.item?.text === "string") {
+    return message.item.text;
+  }
   const content = message.message?.content ?? message.item?.content ?? message.content;
   if (typeof content === "string") {
     return content;
@@ -1480,15 +1483,41 @@ function handleCodexCliStreamLine(line, state) {
   }
 
   const type = String(message.type ?? message.event ?? "");
+  const itemType = String(message.item?.type ?? "");
   if (/session|init|started/i.test(type) && !state.sawInit) {
     state.sawInit = true;
-    process.stderr.write(`[codex-init] session=${message.session_id ?? message.sessionId ?? message.id ?? "unknown"} model=${message.model ?? "unknown"} cwd=${message.cwd ?? "unknown"}\n`);
+    state.sessionId = message.thread_id ?? message.session_id ?? message.sessionId ?? message.id ?? "unknown";
+    process.stderr.write(`[codex-init] session=${state.sessionId} model=${message.model ?? "unknown"} cwd=${message.cwd ?? "unknown"}\n`);
   }
-  if (/tool.*start|item.*start/i.test(type) || message.item?.type === "tool_call") {
+  if (type === "turn.started") {
+    process.stderr.write("[codex-progress] turn.started\n");
+    return;
+  }
+  if (type === "turn.completed") {
+    const usage = message.usage;
+    const usageText = usage ? ` input=${usage.input_tokens ?? "unknown"} output=${usage.output_tokens ?? "unknown"} reasoning=${usage.reasoning_output_tokens ?? "unknown"}` : "";
+    process.stderr.write(`[codex-progress] turn.completed${usageText}\n`);
+    state.completed = true;
+    process.stderr.write(`[codex-result] success session=${state.sessionId ?? "unknown"}\n`);
+    return;
+  }
+  if (type === "item.started" && itemType === "command_execution") {
+    process.stderr.write(`[codex-tool-start] ${message.item?.command ?? "command_execution"}\n`);
+    return;
+  }
+  if (type === "item.completed" && itemType === "command_execution") {
+    process.stderr.write(`[codex-tool-result] status=${message.item?.status ?? "unknown"} exit=${message.item?.exit_code ?? "unknown"}\n`);
+    return;
+  }
+  if (type === "item.started" && itemType) {
+    process.stderr.write(`[codex-progress] item.started ${itemType}\n`);
+    return;
+  }
+  if (/tool.*start/i.test(type) || itemType === "tool_call") {
     process.stderr.write(`[codex-tool-start] ${message.name ?? message.item?.name ?? message.tool_name ?? "unknown"}\n`);
     return;
   }
-  if (/tool.*result|item.*complete/i.test(type) || message.item?.type === "tool_call_output") {
+  if (/tool.*result/i.test(type) || itemType === "tool_call_output") {
     process.stderr.write("[codex-tool-result]\n");
     return;
   }
@@ -1497,7 +1526,7 @@ function handleCodexCliStreamLine(line, state) {
   }
 
   const text = codexEventText(message);
-  if (text && !/result|complete|done/i.test(type)) {
+  if (text && (itemType === "agent_message" || !/result|complete|done/i.test(type))) {
     process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
     state.output += text.endsWith("\n") ? text : `${text}\n`;
     return;
@@ -1511,7 +1540,9 @@ function handleCodexCliStreamLine(line, state) {
       process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
       state.output += text.endsWith("\n") ? text : `${text}\n`;
     }
-    process.stderr.write(`[codex-result] success session=${message.session_id ?? message.sessionId ?? message.id ?? "unknown"}\n`);
+    if (type !== "item.completed") {
+      process.stderr.write(`[codex-result] success session=${message.session_id ?? message.sessionId ?? message.id ?? state.sessionId ?? "unknown"}\n`);
+    }
   }
 }
 

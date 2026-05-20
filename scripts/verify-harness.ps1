@@ -218,6 +218,8 @@ $sdkRunnerExpected = @(
   "[openai-result]",
   "codexCli",
   "runCodexCli",
+  "agent_message",
+  "command_execution",
   "[codex-result]",
   "codex exec",
   "--ask-for-approval",
