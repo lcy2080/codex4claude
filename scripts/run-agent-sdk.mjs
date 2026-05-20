@@ -69,6 +69,7 @@ External provider options:
   --disallowed-tools <a,b,c>      Blocked SDK tool names.
   --include-partial-messages      Emit SDK partial streaming messages when available.
   --persist-session               Persist SDK session history for later resume/continue.
+  --require-file-changes          Fail if the run completes without workspace file changes.
   --resume <session-id>           Resume an SDK or Codex CLI session by ID.
   --resume-session-at <message-id> Resume an SDK session up to a message UUID.
   --continue                      Continue the latest SDK or Codex CLI session in the current directory.
@@ -112,6 +113,7 @@ Environment fallbacks:
   CODEX_HARNESS_DISALLOWED_TOOLS
   CODEX_HARNESS_INCLUDE_PARTIAL_MESSAGES
   CODEX_HARNESS_PERSIST_SESSION
+  CODEX_HARNESS_REQUIRE_FILE_CHANGES
   CODEX_HARNESS_RESUME
   CODEX_HARNESS_RESUME_SESSION_AT
   CODEX_HARNESS_CONTINUE
@@ -141,6 +143,7 @@ function parseArgs(argv) {
       key === "dry-run" ||
       key === "include-partial-messages" ||
       key === "persist-session" ||
+      key === "require-file-changes" ||
       key === "continue" ||
       key === "no-fallback"
     ) {
@@ -766,6 +769,50 @@ async function walkFiles(startPath, workspaceRoot, results = []) {
     }
   }
   return results;
+}
+
+async function snapshotWorkspaceFiles(workspaceRoot) {
+  const realWorkspace = await fs.promises.realpath(workspaceRoot);
+  const files = await walkFiles(realWorkspace, realWorkspace);
+  const snapshot = new Map();
+  for (const relativeFile of files) {
+    if (isIgnoredWorkspaceSnapshotFile(relativeFile)) {
+      continue;
+    }
+    const fullPath = path.join(realWorkspace, relativeFile);
+    try {
+      const stat = await fs.promises.lstat(fullPath);
+      if (stat.isFile()) {
+        snapshot.set(relativeFile, `${stat.size}:${stat.mtimeMs}`);
+      }
+    } catch {
+      // Files can move while tools run; the next snapshot will capture the final state.
+    }
+  }
+  return snapshot;
+}
+
+function isIgnoredWorkspaceSnapshotFile(relativeFile) {
+  const normalized = relativeFile.replace(/\\/g, "/");
+  return normalized.startsWith(".codex-harness/")
+    || normalized === "data/registry.db"
+    || normalized === "data/usage_history.db";
+}
+
+async function changedWorkspaceFiles(workspaceRoot, before) {
+  const after = await snapshotWorkspaceFiles(workspaceRoot);
+  const changed = [];
+  for (const [relativeFile, signature] of after.entries()) {
+    if (before.get(relativeFile) !== signature) {
+      changed.push(relativeFile);
+    }
+  }
+  for (const relativeFile of before.keys()) {
+    if (!after.has(relativeFile)) {
+      changed.push(relativeFile);
+    }
+  }
+  return changed.sort();
 }
 
 function logOpenAiTool(kind, name, detail = "") {
@@ -1973,6 +2020,8 @@ async function main() {
   if (maxBudgetUsdRaw && (!Number.isFinite(maxBudgetUsd) || maxBudgetUsd <= 0)) {
     throw new Error("--max-budget-usd must be a positive number.");
   }
+  const requireFileChanges = truthy(args["require-file-changes"]) || truthy(process.env.CODEX_HARNESS_REQUIRE_FILE_CHANGES);
+  const fileChangeBaseline = requireFileChanges && !args["dry-run"] ? await snapshotWorkspaceFiles(cwd) : undefined;
 
   const config = readJsonIfPresent(resolveConfigPath(args));
   const sequence = getOption(args, "agent-sequence", "CODEX_HARNESS_AGENT_SEQUENCE");
@@ -1999,6 +2048,13 @@ async function main() {
     if (agents.length > 1 && !args["dry-run"]) {
       process.stderr.write(`[sequence-result] index=${index + 1}/${agents.length} agent=${agent} output=${output ? "nonempty" : "empty"}\n`);
     }
+  }
+  if (fileChangeBaseline) {
+    const changedFiles = await changedWorkspaceFiles(cwd, fileChangeBaseline);
+    if (changedFiles.length === 0) {
+      throw new Error("No workspace file changes detected after agent success. The model may have answered without using file write/edit tools; rerun with stricter instructions or inspect tool-use logs.");
+    }
+    process.stderr.write(`[file-change-result] changed=${changedFiles.length} files=${changedFiles.slice(0, 20).join(",")}\n`);
   }
 }
 
