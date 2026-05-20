@@ -57,7 +57,7 @@ Expose Bash only when it is explicitly needed:
 node <runner> --sdk openai --agent implementation-worker --allowed-tools Bash --cwd <current-workspace> --prompt "$ARGUMENTS"
 ```
 
-For all backends, Bash is not pre-approved unless `--allowed-tools Bash` or manifest `allowBash: true` is set. Claude CLI fallback uses non-interactive `claude -p`, so approval prompts and clarifying questions are not handled by the runner.
+For all backends, Bash is not pre-approved unless `--allowed-tools Bash` or manifest `allowBash: true` is set. Safe workflow tools are allowed by default where the backend supports them; Claude SDK and Claude CLI also allow `Task`/`Agent` subagent tools by default, while OpenAI exposes only runner workflow tools and Codex CLI uses its own runtime policy. Claude CLI fallback uses non-interactive `claude -p`, so approval prompts and clarifying questions are not handled by the runner.
 
 Use explicit bearer-token mode:
 

@@ -585,8 +585,12 @@ function buildSdkEnv(provider, args) {
   return env;
 }
 
+const DEFAULT_ALLOWED_TOOL_NAMES = ["Read", "LS", "Glob", "Grep", "TodoWrite", "ExitPlanMode", "Task", "Agent"];
 const READ_TOOL_NAMES = new Set(["read", "ls", "glob", "grep"]);
-const WRITE_TOOL_NAMES = new Set(["write", "edit", "multiedit"]);
+const WRITE_TOOL_NAMES_CANONICAL = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
+const EXPLICIT_OPT_IN_TOOL_NAMES = new Set(["bash", "webfetch", "websearch"]);
+const DEFAULT_ALLOWED_TOOL_NAMES_LOWER = new Set(DEFAULT_ALLOWED_TOOL_NAMES.map((name) => name.toLowerCase()));
+const WRITE_TOOL_NAMES = new Set(WRITE_TOOL_NAMES_CANONICAL.map((name) => name.toLowerCase()));
 const USER_INPUT_TOOL_NAMES = new Set(["askuserquestion"]);
 
 function optionToolSet(args, option, envName) {
@@ -606,9 +610,9 @@ function buildToolPermissionPolicy(provider, args, agent) {
     writeAllowed,
     bashAllowed,
     defaultAllowedTools() {
-      const names = ["Read", "LS", "Glob", "Grep"];
+      const names = [...DEFAULT_ALLOWED_TOOL_NAMES];
       if (writeAllowed) {
-        names.push("Write", "Edit", "MultiEdit");
+        names.push(...WRITE_TOOL_NAMES_CANONICAL);
       }
       if (bashAllowed) {
         names.push("Bash");
@@ -623,12 +627,20 @@ function buildToolPermissionPolicy(provider, args, agent) {
       if (READ_TOOL_NAMES.has(normalized)) {
         return { decision: "allow", reason: "read-only workspace tool" };
       }
+      if (DEFAULT_ALLOWED_TOOL_NAMES_LOWER.has(normalized)) {
+        return { decision: "allow", reason: "safe workflow tool" };
+      }
       if (WRITE_TOOL_NAMES.has(normalized)) {
         return writeAllowed
           ? { decision: "allow", reason: "write tools enabled by permission policy" }
           : { decision: "deny", reason: "write tools require acceptEdits, bypassPermissions, or manifest allowWrite" };
       }
-      if (normalized === "bash") {
+      if (EXPLICIT_OPT_IN_TOOL_NAMES.has(normalized)) {
+        if (normalized !== "bash") {
+          return allowed.has(normalized)
+            ? { decision: "allow", reason: "tool explicitly allowed" }
+            : { decision: "deny", reason: `${toolName} requires --allowed-tools ${toolName}` };
+        }
         return bashAllowed
           ? { decision: "allow", reason: "Bash explicitly allowed" }
           : { decision: "deny", reason: "Bash requires --allowed-tools Bash or manifest allowBash" };
@@ -853,6 +865,23 @@ async function createOpenAiTools(options, provider, agentName) {
       }
     }
     return matches.join("\n");
+  });
+
+  addTool("TodoWrite", "Record the current task checklist for workflow tracking.", z.object({
+    todos: z.array(z.object({
+      content: z.string(),
+      status: z.enum(["pending", "in_progress", "completed"]),
+      id: z.string().optional()
+    })).max(100)
+  }), async ({ todos }) => {
+    const summary = todos.map((todo) => `${todo.status}: ${todo.content}`).join("\n");
+    return summary || "todo list updated";
+  });
+
+  addTool("ExitPlanMode", "Mark planning complete and continue with implementation.", z.object({
+    plan: z.string().optional()
+  }), async ({ plan }) => {
+    return plan ? `plan accepted\n${plan}` : "plan accepted";
   });
 
   if (policy.writeAllowed) {
@@ -1114,8 +1143,10 @@ async function runSdk(agent, prompt, provider, options) {
     : undefined;
   const permissionHandlers = buildClaudeSdkPermissionHandlers(provider, options, agent);
   const explicitAllowedTools = parseCsv(getOption(options.args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS"));
-  const allowedTools = Array.from(new Set([...permissionHandlers.allowedTools, ...(explicitAllowedTools ?? [])]));
   const disallowedTools = parseCsv(getOption(options.args, "disallowed-tools", "CODEX_HARNESS_DISALLOWED_TOOLS"));
+  const disallowedToolNames = new Set((disallowedTools ?? []).map((name) => name.toLowerCase()));
+  const allowedTools = Array.from(new Set([...permissionHandlers.allowedTools, ...(explicitAllowedTools ?? [])]))
+    .filter((name) => !disallowedToolNames.has(name.toLowerCase()));
   const includePartialMessages = truthy(options.args["include-partial-messages"]) || truthy(process.env.CODEX_HARNESS_INCLUDE_PARTIAL_MESSAGES);
   const resume = getOption(options.args, "resume", "CODEX_HARNESS_RESUME");
   const resumeSessionAt = getOption(options.args, "resume-session-at", "CODEX_HARNESS_RESUME_SESSION_AT");
@@ -1819,8 +1850,11 @@ async function runClaudeCli(agent, prompt, provider, options, reason) {
   const permissionMode = effectivePermissionMode(agent, options.args, options.args.__isSequence);
   const permissionPolicy = buildToolPermissionPolicy(provider, options.args, agent);
   const explicitAllowedTools = parseCsv(getOption(options.args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS")) ?? [];
-  const allowedTools = Array.from(new Set([...permissionPolicy.defaultAllowedTools(), ...explicitAllowedTools])).join(",");
   const disallowedTools = getOption(options.args, "disallowed-tools", "CODEX_HARNESS_DISALLOWED_TOOLS");
+  const disallowedToolNames = new Set((parseCsv(disallowedTools) ?? []).map((name) => name.toLowerCase()));
+  const allowedTools = Array.from(new Set([...permissionPolicy.defaultAllowedTools(), ...explicitAllowedTools]))
+    .filter((name) => !disallowedToolNames.has(name.toLowerCase()))
+    .join(",");
   const cliArgs = [
     "-p",
     "--agent",
