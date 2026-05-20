@@ -267,6 +267,36 @@ for path in frontmatter_files:
     if not re.search(r"(?s)^---\s+.+?\s+---", read(path)):
         fail(f"Missing frontmatter: {path}")
 
+runner_command_files = [
+    ".claude/commands/plan.md",
+    ".claude/commands/implement.md",
+    ".claude/commands/review.md",
+    ".claude/commands/verify.md",
+    ".claude/commands/handoff.md",
+    ".claude/commands/external-agent.md",
+    "plugins/codex-harness/commands/plan.md",
+    "plugins/codex-harness/commands/implement.md",
+    "plugins/codex-harness/commands/review.md",
+    "plugins/codex-harness/commands/verify.md",
+    "plugins/codex-harness/commands/handoff.md",
+    "plugins/codex-harness/commands/external-agent.md",
+]
+runner_resolution_expected = [
+    "CODEX_HARNESS_RUNNER_PATH",
+    "CODEX_HARNESS_HOME/scripts/run-agent-sdk.mjs",
+    r"marketplaces\codex4claude\scripts\run-agent-sdk.mjs",
+    "marketplaces/codex4claude/scripts/run-agent-sdk.mjs",
+    "--cwd <current-workspace>",
+    "claude --add-dir <harness-or-marketplace-checkout>",
+]
+for path in runner_command_files:
+    content = read(path)
+    for expected in runner_resolution_expected:
+        if expected not in content:
+            fail(f"Expected {path} to include runner resolution text: {expected}")
+    if "If the runner is unavailable in this workspace" in content:
+        fail(f"Expected {path} to avoid target-workspace-only runner wording.")
+
 model_files = [
     ".claude/agents/context-explorer.md",
     ".claude/agents/implementation-worker.md",

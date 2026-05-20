@@ -136,7 +136,7 @@ The optional runner lets this harness use external APIs through either the Claud
 
 Claude Code Max/Pro users should leave external provider settings empty. When provider settings are missing or the SDK path fails, the runner falls back to the installed `claude` CLI with `claude -p --agent codex-harness:codex-main`, which keeps using the normal Claude Code CLI subscription/auth path instead of calling Claude Code through Agent SDK.
 
-All role slash commands prefer `scripts/run-agent-sdk.mjs` first and let each agent's `modeEnv` select the backend. The checked-in manifest keeps every agent on `mode: "claudeCli"` by default for Max/Pro-compatible usage. Set a role mode env to `external`, `anthropic`, `openai`, or `codexCli` only when that role should leave the default Claude CLI path.
+All role slash commands prefer the harness runner first and let each agent's `modeEnv` select the backend. Commands resolve the runner from `CODEX_HARNESS_RUNNER_PATH`, `CODEX_HARNESS_HOME/scripts/run-agent-sdk.mjs`, the installed `codex4claude` marketplace checkout, or the current workspace's `scripts/run-agent-sdk.mjs`; when the runner is outside the target project, they pass `--cwd` for the current workspace. Claude Code must also be allowed to read the harness or marketplace checkout, so launch target-project sessions with `claude --add-dir <harness-or-marketplace-checkout>` when the runner lives outside the workspace. The checked-in manifest keeps every agent on `mode: "claudeCli"` by default for Max/Pro-compatible usage. Set a role mode env to `external`, `anthropic`, `openai`, or `codexCli` only when that role should leave the default Claude CLI path.
 
 Command routing:
 
@@ -169,6 +169,12 @@ node scripts/run-agent-sdk.mjs --agent implementation-worker --cwd C:\tmp\codex4
 ```
 
 Plugin marketplace installs follow the same rule: run the runner from the harness, marketplace checkout, or bundled runner location. The target project is the `--cwd` workspace, not the place where runner npm dependencies should be installed.
+
+When using a plugin command from a target project, add the harness or marketplace checkout as an allowed directory if it is outside the workspace:
+
+```powershell
+claude --add-dir C:\Users\you\.claude\plugins\marketplaces\codex4claude
+```
 
 Use `.env.local.example` as a key-free template for local provider settings. Keep real provider URLs and credentials in your shell or ignored `.env.local` files only.
 

@@ -1,7 +1,7 @@
 {
   "name": "codex4claude",
   "description": "Claude Code plugins for Codex-style planning, implementation, review, and verification workflows.",
-  "version": "0.1.0-dev-4",
+  "version": "0.1.0-dev-5",
   "owner": {
     "name": "lcy2080"
   },
@@ -11,7 +11,7 @@
       "displayName": "Codex Harness",
       "source": "./plugins/codex-harness",
       "description": "Codex-style operating harness for Claude Code with skills, agents, slash commands, output style, model policy, effort policy, and verification discipline.",
-      "version": "0.1.0-dev-4",
+      "version": "0.1.0-dev-5",
       "author": {
         "name": "lcy2080"
       },

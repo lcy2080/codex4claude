@@ -16,11 +16,13 @@ The plugin provides:
 
 Slash command routing:
 
-- `plan`: prefers `node scripts/run-agent-sdk.mjs --agent context-explorer --prompt "$ARGUMENTS"`.
-- `implement`: prefers `node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --prompt "$ARGUMENTS"`.
-- `review`: prefers `node scripts/run-agent-sdk.mjs --agent code-reviewer --prompt "$ARGUMENTS"`.
-- `verify`: prefers `node scripts/run-agent-sdk.mjs --agent verification-auditor --prompt "$ARGUMENTS"`.
-- `handoff`: prefers `node scripts/run-agent-sdk.mjs --agent codex-main --prompt "$ARGUMENTS"`.
+Commands resolve the runner from `CODEX_HARNESS_RUNNER_PATH`, `CODEX_HARNESS_HOME/scripts/run-agent-sdk.mjs`, the installed `codex4claude` marketplace checkout, or the current workspace's `scripts/run-agent-sdk.mjs`. When the runner is outside the target workspace, commands pass `--cwd <current-workspace>` so the agent works on the opened project instead of the harness checkout. Claude Code must be launched with `--add-dir <harness-or-marketplace-checkout>` when that runner directory is outside the workspace.
+
+- `plan`: prefers `node <runner> --agent context-explorer --cwd <current-workspace> --prompt "$ARGUMENTS"`.
+- `implement`: prefers `node <runner> --agent implementation-worker --permission-mode acceptEdits --cwd <current-workspace> --prompt "$ARGUMENTS"`.
+- `review`: prefers `node <runner> --agent code-reviewer --cwd <current-workspace> --prompt "$ARGUMENTS"`.
+- `verify`: prefers `node <runner> --agent verification-auditor --cwd <current-workspace> --prompt "$ARGUMENTS"`.
+- `handoff`: prefers `node <runner> --agent codex-main --cwd <current-workspace> --prompt "$ARGUMENTS"`.
 
 The default agent provider mode remains `claudeCli`. Set a role-specific mode env such as `CODEX_HARNESS_IMPLEMENTATION_WORKER_MODE=codexCli`, `CODEX_HARNESS_CODE_REVIEWER_MODE=external`, `CODEX_HARNESS_CODE_REVIEWER_MODE=anthropic`, or `CODEX_HARNESS_CODE_REVIEWER_MODE=openai` only when that role should leave the default Claude CLI path. If the runner is unavailable, each command continues in the current Claude Code session and says so.
 

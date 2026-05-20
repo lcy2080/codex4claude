@@ -248,6 +248,40 @@ foreach ($relativePath in $frontmatterFiles) {
   }
 }
 
+$runnerCommandFiles = @(
+  ".claude/commands/plan.md",
+  ".claude/commands/implement.md",
+  ".claude/commands/review.md",
+  ".claude/commands/verify.md",
+  ".claude/commands/handoff.md",
+  ".claude/commands/external-agent.md",
+  "plugins/codex-harness/commands/plan.md",
+  "plugins/codex-harness/commands/implement.md",
+  "plugins/codex-harness/commands/review.md",
+  "plugins/codex-harness/commands/verify.md",
+  "plugins/codex-harness/commands/handoff.md",
+  "plugins/codex-harness/commands/external-agent.md"
+)
+$runnerResolutionExpected = @(
+  "CODEX_HARNESS_RUNNER_PATH",
+  "CODEX_HARNESS_HOME/scripts/run-agent-sdk.mjs",
+  "marketplaces\codex4claude\scripts\run-agent-sdk.mjs",
+  "marketplaces/codex4claude/scripts/run-agent-sdk.mjs",
+  "--cwd <current-workspace>",
+  "claude --add-dir <harness-or-marketplace-checkout>"
+)
+foreach ($relativePath in $runnerCommandFiles) {
+  $content = Get-Content -LiteralPath (Join-Path $root $relativePath) -Raw
+  foreach ($expected in $runnerResolutionExpected) {
+    if ($content -notmatch [regex]::Escape($expected)) {
+      Write-Error "Expected $relativePath to include runner resolution text: $expected"
+    }
+  }
+  if ($content -match "If the runner is unavailable in this workspace") {
+    Write-Error "Expected $relativePath to avoid target-workspace-only runner wording."
+  }
+}
+
 $modelFiles = @(
   ".claude/agents/context-explorer.md",
   ".claude/agents/implementation-worker.md",
