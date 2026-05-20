@@ -117,6 +117,8 @@ Environment fallbacks:
   CODEX_HARNESS_RESUME
   CODEX_HARNESS_RESUME_SESSION_AT
   CODEX_HARNESS_CONTINUE
+  CODEX_HARNESS_CLAUDE_CLI
+  CODEX_HARNESS_CODEX_CLI
   CODEX_HARNESS_PERMISSION_MODE
   CODEX_HARNESS_CONTEXT_EXPLORER_PERMISSION_MODE
   CODEX_HARNESS_IMPLEMENTATION_WORKER_PERMISSION_MODE
@@ -1607,7 +1609,8 @@ async function cleanupActiveCodexChildren(reason) {
 
 function spawnClaudeCli(cliArgs, options) {
   return new Promise((resolve, reject) => {
-    const child = spawn("claude", cliArgs, {
+    const claudeCommand = resolveCliCommand(process.env.CODEX_HARNESS_CLAUDE_CLI, "claude", cliArgs);
+    const child = spawn(claudeCommand.command, claudeCommand.args, {
       cwd: options.cwd,
       env: process.env,
       shell: false,
@@ -1841,6 +1844,9 @@ function spawnCodexCli(cliArgs, options) {
 }
 
 function resolveCodexCommand(cliArgs) {
+  if (process.env.CODEX_HARNESS_CODEX_CLI) {
+    return resolveCliCommand(process.env.CODEX_HARNESS_CODEX_CLI, "codex", cliArgs);
+  }
   if (process.platform !== "win32") {
     return { command: "codex", args: cliArgs };
   }
@@ -1849,6 +1855,14 @@ function resolveCodexCommand(cliArgs) {
     return { command: process.execPath, args: [npmCodexJs, ...cliArgs] };
   }
   return { command: "codex", args: cliArgs };
+}
+
+function resolveCliCommand(commandPath, defaultCommand, cliArgs) {
+  const command = commandPath || defaultCommand;
+  if (/\.m?js$|\.cjs$/i.test(command)) {
+    return { command: process.execPath, args: [command, ...cliArgs] };
+  }
+  return { command, args: cliArgs };
 }
 
 async function runCodexCli(agent, prompt, provider, options) {

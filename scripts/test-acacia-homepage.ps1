@@ -39,6 +39,7 @@ $runnerArgs = @(
   "scripts/run-agent-sdk.mjs",
   "--agent", "implementation-worker",
   "--permission-mode", "acceptEdits",
+  "--require-file-changes",
   "--overall-timeout-ms", "180000",
   "--cwd", $testCwd,
   "--prompt", $prompt

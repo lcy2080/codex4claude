@@ -124,10 +124,10 @@ Recommended flow:
 ## Slash Commands
 
 - `/codex-harness:plan <task>` or `/plan <task>`: Prefer the runner with `context-explorer`, then build a scoped implementation plan in-session if the runner is unavailable. Uses `opus` with `xhigh` effort.
-- `/codex-harness:implement <task>` or `/implement <task>`: Prefer the runner with `implementation-worker --permission-mode acceptEdits`, then make a focused change in-session if the runner is unavailable. Uses `sonnet` with `medium` effort.
+- `/codex-harness:implement <task>` or `/implement <task>`: Prefer the runner with `implementation-worker --permission-mode acceptEdits --require-file-changes`, then make a focused change in-session if the runner is unavailable. Uses `sonnet` with `medium` effort.
 - `/codex-harness:review <scope>` or `/review <scope>`: Prefer the runner with `code-reviewer`, then review in-session if the runner is unavailable. Uses `opus` with `xhigh` effort.
 - `/codex-harness:verify <scope>` or `/verify <scope>`: Prefer the runner with `verification-auditor`, then audit in-session if the runner is unavailable. Uses `opus` with `xhigh` effort.
-- `/codex-harness:handoff <scope>` or `/handoff <scope>`: Prefer the runner with `codex-main`, then write a continuation note in-session if the runner is unavailable. Uses `haiku` with `low` effort.
+- `/codex-harness:handoff <scope>` or `/handoff <scope>`: Prefer the runner with `codex-main --permission-mode acceptEdits --require-file-changes` to write `continue.md`, then write a continuation note in-session if the runner is unavailable. Uses `haiku` with `low` effort.
 - `/codex-harness:external-agent <task>` or `/external-agent <task>`: Run the harness through the configured external SDK backend, Codex CLI backend, or Claude CLI fallback. Uses `sonnet` with `medium` effort.
 
 ## Run With Multi-Backend Agent Runner
@@ -143,10 +143,10 @@ Command routing:
 | Slash command | Runner agent | Extra runner option |
 | --- | --- | --- |
 | `/codex-harness:plan` or `/plan` | `context-explorer` | |
-| `/codex-harness:implement` or `/implement` | `implementation-worker` | `--permission-mode acceptEdits` |
+| `/codex-harness:implement` or `/implement` | `implementation-worker` | `--permission-mode acceptEdits --require-file-changes` |
 | `/codex-harness:review` or `/review` | `code-reviewer` | |
 | `/codex-harness:verify` or `/verify` | `verification-auditor` | |
-| `/codex-harness:handoff` or `/handoff` | `codex-main` | |
+| `/codex-harness:handoff` or `/handoff` | `codex-main` | `--permission-mode acceptEdits --require-file-changes` |
 
 Codex CLI users can route an agent to local `codex exec` without provider credentials by setting that agent's mode env to `codexCli`.
 
@@ -165,7 +165,7 @@ Those dependencies are declared in `package.json`: `@anthropic-ai/claude-agent-s
 Run the harness-installed runner against another workspace with `--cwd`:
 
 ```powershell
-node scripts/run-agent-sdk.mjs --agent implementation-worker --cwd C:\tmp\codex4claude-acacia-site-test --prompt "Create the requested files"
+node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --require-file-changes --cwd C:\tmp\codex4claude-acacia-site-test --prompt "Create the requested files"
 ```
 
 Plugin marketplace installs follow the same rule: run the runner from the harness, marketplace checkout, or bundled runner location. The target project is the `--cwd` workspace, not the place where runner npm dependencies should be installed.
@@ -221,13 +221,13 @@ node scripts/run-agent-sdk.mjs --api-key-env PROVIDER_API_KEY --model provider-s
 For non-interactive runs that need to write files, pass a Claude Agent SDK permission mode explicitly:
 
 ```bash
-node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --prompt "Create the requested files"
+node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --require-file-changes --prompt "Create the requested files"
 ```
 
 For production-style or provider compatibility tests, cap both agentic turns and wall-clock time:
 
 ```bash
-node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --allowed-tools Read,Write,Edit,Glob,Grep --max-turns 10 --overall-timeout-ms 180000 --prompt "Create the requested files"
+node scripts/run-agent-sdk.mjs --agent implementation-worker --permission-mode acceptEdits --require-file-changes --allowed-tools Read,Write,Edit,Glob,Grep --max-turns 10 --overall-timeout-ms 180000 --prompt "Create the requested files"
 ```
 
 Runner option notes:
@@ -246,7 +246,7 @@ Runner option notes:
 - Read-only review runs that inspect multiple files can need more turns than small probes. Use `--max-turns 12` to `--max-turns 20` for provider smoke tests that require `LS`, `Glob`, `Read`, and final synthesis.
 - Thinking stream events are only marked as `[sdk-thinking]` or `[fallback-thinking]`; hidden reasoning text is not printed.
 - `--allowed-tools` pre-approves listed tools and is required for Bash, `WebFetch`, and `WebSearch` unless manifest `allowBash: true` applies to Bash. `--disallowed-tools` always wins over allowed/default policy.
-- `--require-file-changes` fails a successful agent run if no workspace file changed, ignoring known runner/CLI runtime artifacts. `/implement` uses this so provider-backed agents cannot report completed edits without applying them to disk.
+- `--require-file-changes` fails a successful agent run if no workspace file changed, ignoring known runner/CLI runtime artifacts. `/implement`, `/handoff`, and provider-backed write examples use this so agents cannot report completed edits without applying them to disk.
 - `--max-budget-usd` stops a query if the SDK reports that the cost budget has been exceeded.
 - Claude CLI fallback receives the same permission, tool pre-approval/block, and budget options where the installed `claude` CLI supports them. Because `claude -p` is non-interactive here, the runner passes pre-approved read/workflow/subagent/edit tools and relies on policies that avoid mid-run prompts; interactive approval and clarifying-question handling are not supported in this fallback.
 - `--persist-session` keeps SDK session history. In OpenAI mode, history is stored under `.codex-harness/openai-sessions/` inside the selected workspace and `[openai-result]` reports the session id. Codex CLI mode lets `codex exec` keep its own session history; `--resume <session-id>` maps to `codex exec resume <session-id>` and `--continue` maps to `codex exec resume --last`. `--resume-session-at` is not supported by Codex CLI mode.
@@ -380,7 +380,7 @@ export CODEX_HARNESS_CODE_REVIEWER_MODEL="provider-c-review"
 Run multiple agents in sequence, allowing each agent to choose its own external provider, Codex CLI backend, or main Claude CLI fallback:
 
 ```bash
-node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --prompt "Implement and review this change"
+node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --permission-mode acceptEdits --require-file-changes --prompt "Implement and review this change"
 ```
 
 Real sequence runs emit `[sequence-start]` and `[sequence-result]` around each agent. The agent's own backend still emits its normal `[openai-*]`, `[sdk-*]`, `[codex-*]`, or `[fallback-*]` markers inside that step.
@@ -450,6 +450,7 @@ Environment override notes:
 - `package.json`: Node dependency and npm script entry points for the optional SDK runner.
 - `config/agent-providers.json`: Env-only agent provider routing manifest.
 - `scripts/run-agent-sdk.mjs`: Generic multi-SDK runner for Anthropic-compatible and OpenAI-compatible providers.
+- `scripts/test-file-change-guard.ps1`: Functional guard test for `--require-file-changes`.
 - `scripts/verify-harness.ps1`: Structural verifier for the harness.
 - `scripts/verify-harness.sh`: POSIX shell verifier for Linux and macOS.
 
@@ -465,6 +466,12 @@ On Windows, use the PowerShell verifier:
 
 ```powershell
 pwsh -File scripts/verify-harness.ps1
+```
+
+To exercise the file-change guard without relying on a real provider or CLI profile:
+
+```powershell
+pwsh -File scripts/test-file-change-guard.ps1
 ```
 
 The verifier checks:

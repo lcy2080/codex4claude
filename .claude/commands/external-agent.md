@@ -18,7 +18,7 @@ node <runner> --agent context-explorer --cwd <current-workspace> --prompt "$ARGU
 Use sequence routing when the task should pass through multiple agents:
 
 ```bash
-node <runner> --agent-sequence context-explorer,implementation-worker,code-reviewer --cwd <current-workspace> --prompt "$ARGUMENTS"
+node <runner> --agent-sequence context-explorer,implementation-worker,code-reviewer --permission-mode acceptEdits --require-file-changes --cwd <current-workspace> --prompt "$ARGUMENTS"
 ```
 
 Sequence routing applies role permission presets: `context-explorer`, `code-reviewer`, and `verification-auditor` are read-only by default, while `implementation-worker` keeps the requested `--permission-mode`. Override a role only when needed with `CODEX_HARNESS_CONTEXT_EXPLORER_PERMISSION_MODE`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_PERMISSION_MODE`, `CODEX_HARNESS_CODE_REVIEWER_PERMISSION_MODE`, or `CODEX_HARNESS_VERIFICATION_AUDITOR_PERMISSION_MODE`.
@@ -26,7 +26,7 @@ Sequence routing applies role permission presets: `context-explorer`, `code-revi
 Use a manifest entry with `mode: "codexCli"` when the user wants local Codex CLI execution without API credentials:
 
 ```bash
-node <runner> --agent implementation-worker --permission-mode acceptEdits --cwd <current-workspace> --prompt "$ARGUMENTS"
+node <runner> --agent implementation-worker --permission-mode acceptEdits --require-file-changes --cwd <current-workspace> --prompt "$ARGUMENTS"
 ```
 
 Use the agent-specific `modeEnv` values to switch backends without editing the manifest. `anthropic` and `openai` select external provider mode with the matching SDK; `codexCli` selects local `codex exec`; `claudeCli` selects the main Claude CLI fallback path.
@@ -48,8 +48,10 @@ node <runner> --sdk openai --base-url "$CODEX_HARNESS_BASE_URL" --api-key-env OP
 For OpenAI-compatible write runs, expose edit tools only when the task requires edits:
 
 ```bash
-node <runner> --sdk openai --agent implementation-worker --permission-mode acceptEdits --cwd <current-workspace> --prompt "$ARGUMENTS"
+node <runner> --sdk openai --agent implementation-worker --permission-mode acceptEdits --require-file-changes --cwd <current-workspace> --prompt "$ARGUMENTS"
 ```
+
+For provider-backed runs that are expected to write files, include `--require-file-changes` so a successful text-only response with no workspace change is treated as a failed run.
 
 Expose Bash only when it is explicitly needed:
 

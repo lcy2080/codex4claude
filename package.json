@@ -1,6 +1,6 @@
 {
   "name": "codex4claude",
-  "version": "1.0.1-dev.1",
+  "version": "1.0.1-dev.2",
   "private": true,
   "type": "module",
   "description": "Claude Code Codex-style harness with optional multi-SDK external provider runner.",
@@ -9,6 +9,7 @@
   },
   "scripts": {
     "agent:run": "node scripts/run-agent-sdk.mjs",
+    "test:file-change-guard": "pwsh -File scripts/test-file-change-guard.ps1",
     "verify:sh": "sh scripts/verify-harness.sh",
     "verify:ps": "pwsh -File scripts/verify-harness.ps1",
     "plugin:validate": "claude plugin validate . && claude plugin validate plugins/codex-harness"
