@@ -83,7 +83,7 @@ Claude CLI fallback:
   This preserves Claude Code Max/Pro subscription usage without calling Claude Code through Agent SDK.
 
 Codex CLI backend:
-  Agents with mode "codexCli" run local codex exec with --sandbox and --ask-for-approval
+  Agents with mode "codexCli" run local codex exec with --sandbox and --ask-for-approval never
   mapped from --permission-mode. --allowed-tools and --disallowed-tools are not applied.
   In --agent-sequence runs, role permission presets keep context-explorer, code-reviewer,
   and verification-auditor read-only by default; implementation-worker keeps the requested
@@ -499,6 +499,7 @@ function printRouting(agent, provider, args) {
   const continueSession = truthy(args.continue) || truthy(process.env.CODEX_HARNESS_CONTINUE);
   const permissionMode = effectivePermissionMode(agent, args, args.__isSequence);
   const codexMapping = provider.mode === "codexCli" ? codexCliPermissionMapping(permissionMode) : undefined;
+  const policy = buildToolPermissionPolicy(provider, args, agent);
   const payload = {
     agent,
     mode: provider.mode,
@@ -515,8 +516,11 @@ function printRouting(agent, provider, args) {
     credentialEnv: provider.credentialEnv ?? provider.entry?.credential?.env,
     permissionMode,
     permissionModeEnv: permissionEnvNameForAgent(agent),
-    writeTools: provider.mode === "codexCli" ? false : canExposeWriteTools(provider, args, agent),
-    bashTool: provider.mode === "codexCli" ? false : canExposeBashTool(provider, args, agent),
+    handlesApprovals: provider.mode === "external" && ["anthropic", "openai"].includes(provider.sdk ?? DEFAULT_SDK),
+    handlesUserInput: provider.mode === "external" && (provider.sdk ?? DEFAULT_SDK) === "anthropic",
+    nonInteractiveApproval: true,
+    writeTools: provider.mode === "codexCli" ? false : policy.writeAllowed,
+    bashTool: provider.mode === "codexCli" ? false : policy.bashAllowed,
     codexProfileEnv: provider.codexProfileEnv ?? provider.entry?.codexProfileEnv,
     codexModelEnv: provider.codexModelEnv ?? provider.entry?.codexModelEnv,
     sandbox: codexMapping?.sandbox,
@@ -542,12 +546,12 @@ function sanitizeReason(reason, provider) {
 
 function codexCliPermissionMapping(permissionMode) {
   if (permissionMode === "acceptEdits") {
-    return { sandbox: "workspace-write", approvalPolicy: "on-request" };
+    return { sandbox: "workspace-write", approvalPolicy: "never" };
   }
   if (permissionMode === "bypassPermissions") {
     return { sandbox: "workspace-write", approvalPolicy: "never" };
   }
-  return { sandbox: "read-only", approvalPolicy: "on-request" };
+  return { sandbox: "read-only", approvalPolicy: "never" };
 }
 
 function buildFallbackPrompt(agent, prompt, provider, reason) {
@@ -581,8 +585,63 @@ function buildSdkEnv(provider, args) {
   return env;
 }
 
+const READ_TOOL_NAMES = new Set(["read", "ls", "glob", "grep"]);
+const WRITE_TOOL_NAMES = new Set(["write", "edit", "multiedit"]);
+const USER_INPUT_TOOL_NAMES = new Set(["askuserquestion"]);
+
+function optionToolSet(args, option, envName) {
+  return new Set((parseCsv(getOption(args, option, envName)) ?? []).map((name) => name.toLowerCase()));
+}
+
 function openAiAllowedSet(args) {
   return new Set(parseCsv(getOption(args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS")) ?? []);
+}
+
+function buildToolPermissionPolicy(provider, args, agent) {
+  const allowed = optionToolSet(args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS");
+  const disallowed = optionToolSet(args, "disallowed-tools", "CODEX_HARNESS_DISALLOWED_TOOLS");
+  const writeAllowed = canExposeWriteTools(provider, args, agent);
+  const bashAllowed = canExposeBashTool(provider, args, agent);
+  return {
+    writeAllowed,
+    bashAllowed,
+    defaultAllowedTools() {
+      const names = ["Read", "LS", "Glob", "Grep"];
+      if (writeAllowed) {
+        names.push("Write", "Edit", "MultiEdit");
+      }
+      if (bashAllowed) {
+        names.push("Bash");
+      }
+      return names.filter((name) => !disallowed.has(name.toLowerCase()));
+    },
+    decide(toolName) {
+      const normalized = String(toolName ?? "").toLowerCase();
+      if (disallowed.has(normalized)) {
+        return { decision: "deny", reason: "tool is blocked by --disallowed-tools" };
+      }
+      if (READ_TOOL_NAMES.has(normalized)) {
+        return { decision: "allow", reason: "read-only workspace tool" };
+      }
+      if (WRITE_TOOL_NAMES.has(normalized)) {
+        return writeAllowed
+          ? { decision: "allow", reason: "write tools enabled by permission policy" }
+          : { decision: "deny", reason: "write tools require acceptEdits, bypassPermissions, or manifest allowWrite" };
+      }
+      if (normalized === "bash") {
+        return bashAllowed
+          ? { decision: "allow", reason: "Bash explicitly allowed" }
+          : { decision: "deny", reason: "Bash requires --allowed-tools Bash or manifest allowBash" };
+      }
+      if (USER_INPUT_TOOL_NAMES.has(normalized)) {
+        return { decision: "deny", reason: "non-interactive runner cannot answer clarifying questions; continue with provided instructions or rerun interactively" };
+      }
+      if (allowed.has(normalized)) {
+        return { decision: "allow", reason: "tool explicitly allowed" };
+      }
+      return { decision: "deny", reason: "tool is not approved for non-interactive runner execution" };
+    }
+  };
 }
 
 function canExposeWriteTools(provider, args, agent) {
@@ -704,8 +763,9 @@ function logOpenAiTool(kind, name, detail = "") {
 async function createOpenAiTools(options, provider, agentName) {
   const [{ tool }, { z }] = await Promise.all([import("@openai/agents"), import("zod")]);
   const workspaceRoot = await fs.promises.realpath(options.cwd);
+  const policy = buildToolPermissionPolicy(provider, options.args, agentName);
   const tools = [];
-  const addTool = (name, description, parameters, execute) => {
+  const addTool = (name, description, parameters, execute, needsApproval = false) => {
     if (isDisallowedTool(name, options.args)) {
       return;
     }
@@ -714,6 +774,7 @@ async function createOpenAiTools(options, provider, agentName) {
       description,
       parameters,
       strict: true,
+      needsApproval,
       async execute(input) {
         logOpenAiTool("start", name);
         const result = await execute(input);
@@ -794,7 +855,7 @@ async function createOpenAiTools(options, provider, agentName) {
     return matches.join("\n");
   });
 
-  if (canExposeWriteTools(provider, options.args, agentName)) {
+  if (policy.writeAllowed) {
     addTool("Edit", "Replace existing text in a workspace file after verifying the old text is present.", z.object({
       file_path: z.string(),
       old_string: z.string(),
@@ -809,7 +870,7 @@ async function createOpenAiTools(options, provider, agentName) {
       const updated = replaceAll ? content.split(oldString).join(newString) : content.replace(oldString, newString);
       await fs.promises.writeFile(resolved, updated, "utf8");
       return `edited ${path.relative(workspaceRoot, resolved)}`;
-    });
+    }, true);
 
     addTool("MultiEdit", "Apply ordered text replacements to a workspace file, each with preimage verification.", z.object({
       file_path: z.string(),
@@ -829,7 +890,7 @@ async function createOpenAiTools(options, provider, agentName) {
       }
       await fs.promises.writeFile(resolved, content, "utf8");
       return `edited ${path.relative(workspaceRoot, resolved)} (${edits.length} edits)`;
-    });
+    }, true);
 
     addTool("Write", "Create or overwrite a UTF-8 workspace file.", z.object({
       file_path: z.string(),
@@ -842,10 +903,10 @@ async function createOpenAiTools(options, provider, agentName) {
       await fs.promises.mkdir(path.dirname(resolved), { recursive: true });
       await fs.promises.writeFile(resolved, content, "utf8");
       return `wrote ${path.relative(workspaceRoot, resolved)}`;
-    });
+    }, true);
   }
 
-  if (canExposeBashTool(provider, options.args, agentName)) {
+  if (policy.bashAllowed) {
     addTool("Bash", "Run an approved command in the workspace root with timeout and output caps.", z.object({
       command: z.string(),
       timeout_ms: z.number().int().min(1000).max(120000).optional()
@@ -854,7 +915,7 @@ async function createOpenAiTools(options, provider, agentName) {
         throw new Error("Command is blocked by the harness destructive-command policy.");
       }
       return runOpenAiBash(command, { cwd: workspaceRoot, timeoutMs });
-    });
+    }, true);
   }
 
   return tools;
@@ -983,6 +1044,62 @@ function handleStreamEvent(message, state, prefix) {
   }
 }
 
+function buildClaudeSdkPermissionHandlers(provider, options, agent) {
+  const policy = buildToolPermissionPolicy(provider, options.args, agent);
+  const decide = (toolName) => {
+    process.stderr.write(`[sdk-permission-request] tool=${toolName ?? "unknown"}\n`);
+    const result = policy.decide(toolName);
+    const decision = result.decision === "allow" ? "allow" : "deny";
+    if (String(toolName ?? "").toLowerCase() === "askuserquestion") {
+      process.stderr.write(`[sdk-user-input-denied] tool=AskUserQuestion reason=non-interactive\n`);
+    }
+    process.stderr.write(`[sdk-permission-result] tool=${toolName ?? "unknown"} decision=${decision} reason=${result.reason}\n`);
+    return result;
+  };
+  return {
+    allowedTools: policy.defaultAllowedTools(),
+    canUseTool: async (toolName) => {
+      const result = decide(toolName);
+      if (result.decision === "allow") {
+        return { behavior: "allow" };
+      }
+      return { behavior: "deny", message: result.reason, interrupt: false };
+    },
+    hooks: {
+      PreToolUse: [{
+        hooks: [async (input) => {
+          if (input?.tool_name === "AskUserQuestion") {
+            const result = decide(input.tool_name);
+            return {
+              continue: true,
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason: result.reason
+              }
+            };
+          }
+          return { continue: true };
+        }]
+      }],
+      PermissionRequest: [{
+        hooks: [async (input) => {
+          const result = decide(input?.tool_name);
+          return {
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: "PermissionRequest",
+              decision: result.decision === "allow"
+                ? { behavior: "allow" }
+                : { behavior: "deny", message: result.reason, interrupt: false }
+            }
+          };
+        }]
+      }]
+    }
+  };
+}
+
 async function runSdk(agent, prompt, provider, options) {
   let sdk;
   try {
@@ -995,7 +1112,9 @@ async function runSdk(agent, prompt, provider, options) {
   const timeout = abortController
     ? setTimeout(() => abortController.abort(), options.overallTimeoutMs)
     : undefined;
-  const allowedTools = parseCsv(getOption(options.args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS"));
+  const permissionHandlers = buildClaudeSdkPermissionHandlers(provider, options, agent);
+  const explicitAllowedTools = parseCsv(getOption(options.args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS"));
+  const allowedTools = Array.from(new Set([...permissionHandlers.allowedTools, ...(explicitAllowedTools ?? [])]));
   const disallowedTools = parseCsv(getOption(options.args, "disallowed-tools", "CODEX_HARNESS_DISALLOWED_TOOLS"));
   const includePartialMessages = truthy(options.args["include-partial-messages"]) || truthy(process.env.CODEX_HARNESS_INCLUDE_PARTIAL_MESSAGES);
   const resume = getOption(options.args, "resume", "CODEX_HARNESS_RESUME");
@@ -1025,6 +1144,8 @@ async function runSdk(agent, prompt, provider, options) {
     systemPrompt: { type: "preset", preset: "claude_code" },
     tools: { type: "preset", preset: "claude_code" },
     permissionMode: effectivePermissionMode(agent, options.args, options.args.__isSequence),
+    canUseTool: permissionHandlers.canUseTool,
+    hooks: permissionHandlers.hooks,
     persistSession
   };
   if (options.maxTurns !== null) {
@@ -1211,6 +1332,28 @@ function logOpenAiStreamEvent(event) {
   }
 }
 
+function openAiApprovalToolName(item) {
+  return item?.name ?? item?.toolName ?? item?.rawItem?.name ?? item?.rawItem?.action?.type ?? "unknown";
+}
+
+function applyOpenAiApprovalPolicy(streamed, provider, options, agentName) {
+  const policy = buildToolPermissionPolicy(provider, options.args, agentName);
+  const interruptions = streamed.interruptions ?? [];
+  for (const item of interruptions) {
+    const toolName = openAiApprovalToolName(item);
+    process.stderr.write(`[openai-approval-request] tool=${toolName}\n`);
+    const result = policy.decide(toolName);
+    if (result.decision === "allow") {
+      streamed.state.approve(item);
+      process.stderr.write(`[openai-approval-result] tool=${toolName} decision=approve reason=${result.reason}\n`);
+    } else {
+      streamed.state.reject(item, { message: result.reason });
+      process.stderr.write(`[openai-approval-result] tool=${toolName} decision=reject reason=${result.reason}\n`);
+    }
+  }
+  return interruptions.length > 0;
+}
+
 async function runOpenAiSdk(agentName, prompt, provider, options) {
   let sdk;
   try {
@@ -1250,12 +1393,18 @@ async function runOpenAiSdk(agentName, prompt, provider, options) {
     traceIncludeSensitiveData: false,
     workflowName: "codex4claude"
   });
-  const streamed = await runner.run(agent, prompt, runOptions);
+  let streamed = await runner.run(agent, prompt, runOptions);
   try {
-    for await (const event of streamed) {
-      logOpenAiStreamEvent(event);
+    while (true) {
+      for await (const event of streamed) {
+        logOpenAiStreamEvent(event);
+      }
+      await streamed.completed;
+      if (!applyOpenAiApprovalPolicy(streamed, provider, options, agentName)) {
+        break;
+      }
+      streamed = await runner.run(agent, streamed.state, runOptions);
     }
-    await streamed.completed;
   } finally {
     if (timeout) {
       clearTimeout(timeout);
@@ -1668,7 +1817,9 @@ async function runClaudeCli(agent, prompt, provider, options, reason) {
   const cliAgent = fallback.agent;
   const fallbackPrompt = buildFallbackPrompt(agent, prompt, provider, reason);
   const permissionMode = effectivePermissionMode(agent, options.args, options.args.__isSequence);
-  const allowedTools = getOption(options.args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS");
+  const permissionPolicy = buildToolPermissionPolicy(provider, options.args, agent);
+  const explicitAllowedTools = parseCsv(getOption(options.args, "allowed-tools", "CODEX_HARNESS_ALLOWED_TOOLS")) ?? [];
+  const allowedTools = Array.from(new Set([...permissionPolicy.defaultAllowedTools(), ...explicitAllowedTools])).join(",");
   const disallowedTools = getOption(options.args, "disallowed-tools", "CODEX_HARNESS_DISALLOWED_TOOLS");
   const cliArgs = [
     "-p",

@@ -236,21 +236,31 @@ Runner option notes:
 - `--max-turns` limits SDK agentic turns/API round trips, not elapsed time. Omit it, set `CODEX_HARNESS_MAX_TURNS=none`, or pass `--max-turns none` for no runner-imposed turn cap. Use `--overall-timeout-ms` when a wall-clock stop is required.
 - `--overall-timeout-ms` also bounds Codex CLI and Claude CLI fallback runs. Fallback streams assistant text and emits progress markers such as `[fallback-init]`, `[fallback-message-start]`, `[fallback-tool-start]`, `[fallback-tool-input]`, `[fallback-tool-result]`, `[fallback-progress]`, and `[fallback-result]`.
 - Agent SDK runs emit the same style of stream summaries with the `sdk-` prefix when `--include-partial-messages` is enabled.
-- OpenAI Agents SDK runs emit `[openai-init]`, `[openai-tool-start]`, `[openai-tool-result]`, `[openai-progress]`, and `[openai-result]`.
+- Claude Agent SDK runs handle tool approval through `canUseTool` and `PermissionRequest`/`PreToolUse` hooks. `AskUserQuestion` is denied with a non-interactive message instead of waiting for input.
+- OpenAI Agents SDK runs emit `[openai-init]`, `[openai-tool-start]`, `[openai-tool-result]`, `[openai-approval-request]`, `[openai-approval-result]`, `[openai-progress]`, and `[openai-result]`. Tool approval interruptions are automatically approved or rejected by runner policy and then resumed.
 - Codex CLI runs spawn `codex exec` and emit `[codex-init]`, `[codex-progress]`, `[codex-tool-start]`, `[codex-tool-result]`, and `[codex-result]`.
-- OpenAI mode exposes `Read`, `LS`, `Glob`, and `Grep` by default. `Edit`, `MultiEdit`, and `Write` require `--permission-mode acceptEdits` or a manifest `allowWrite: true`. `Bash` requires `--allowed-tools Bash` or manifest `allowBash: true`, and still runs through timeout, cwd, output-cap, and destructive-command checks.
-- Codex CLI mode maps `--permission-mode default` to `--sandbox read-only --ask-for-approval on-request`, `acceptEdits` to `--sandbox workspace-write --ask-for-approval on-request`, and `bypassPermissions` to `--sandbox workspace-write --ask-for-approval never`. It does not automatically use `danger-full-access`.
+- OpenAI mode exposes `Read`, `LS`, `Glob`, and `Grep` by default. `Edit`, `MultiEdit`, and `Write` require `--permission-mode acceptEdits`, `--permission-mode bypassPermissions`, or a manifest `allowWrite: true`. `Bash` requires `--allowed-tools Bash` or manifest `allowBash: true`, and still runs through timeout, cwd, output-cap, and destructive-command checks.
+- Codex CLI mode maps `--permission-mode default` to `--sandbox read-only --ask-for-approval never`; `acceptEdits` and `bypassPermissions` map to `--sandbox workspace-write --ask-for-approval never`. The runner cannot service mid-run Codex approval UI and does not automatically use `danger-full-access`.
 - In sequence runs, role presets keep `context-explorer`, `code-reviewer`, and `verification-auditor` on `permissionMode=default`; `implementation-worker` keeps the requested `--permission-mode`. Override a role with `CODEX_HARNESS_CONTEXT_EXPLORER_PERMISSION_MODE`, `CODEX_HARNESS_IMPLEMENTATION_WORKER_PERMISSION_MODE`, `CODEX_HARNESS_CODE_REVIEWER_PERMISSION_MODE`, or `CODEX_HARNESS_VERIFICATION_AUDITOR_PERMISSION_MODE`.
 - `--allowed-tools` and `--disallowed-tools` have no direct Codex CLI equivalent and are not applied by the Codex CLI backend.
 - Read-only review runs that inspect multiple files can need more turns than small probes. Use `--max-turns 12` to `--max-turns 20` for provider smoke tests that require `LS`, `Glob`, `Read`, and final synthesis.
 - Thinking stream events are only marked as `[sdk-thinking]` or `[fallback-thinking]`; hidden reasoning text is not printed.
-- `--allowed-tools` pre-approves listed tools. It is not a strict allow-list when the preset Claude Code toolset is enabled; use `--disallowed-tools` to block known tools.
+- `--allowed-tools` pre-approves listed tools and is required for Bash unless manifest `allowBash: true` is set. `--disallowed-tools` always wins over allowed/default policy.
 - `--max-budget-usd` stops a query if the SDK reports that the cost budget has been exceeded.
-- Claude CLI fallback receives the same permission, tool pre-approval/block, and budget options where the installed `claude` CLI supports them.
+- Claude CLI fallback receives the same permission, tool pre-approval/block, and budget options where the installed `claude` CLI supports them. Because `claude -p` is non-interactive here, the runner passes pre-approved read/edit tools and relies on policies that avoid mid-run prompts; interactive approval and clarifying-question handling are not supported in this fallback.
 - `--persist-session` keeps SDK session history. In OpenAI mode, history is stored under `.codex-harness/openai-sessions/` inside the selected workspace and `[openai-result]` reports the session id. Codex CLI mode lets `codex exec` keep its own session history; `--resume <session-id>` maps to `codex exec resume <session-id>` and `--continue` maps to `codex exec resume --last`. `--resume-session-at` is not supported by Codex CLI mode.
 - OpenAI tracing is opt-in with `CODEX_HARNESS_OPENAI_TRACING=1`; trace export is configured with `traceIncludeSensitiveData: false` so tool inputs, prompts, and secrets are not intentionally exported.
 
 Claude SDK options follow the Claude Agent SDK behavior documented in the official overview and TypeScript SDK reference: https://code.claude.com/docs/en/agent-sdk/overview
+
+Backend approval and input handling:
+
+| Backend | Approval Handling | User Input Handling |
+| --- | --- | --- |
+| Claude Agent SDK | Uses `canUseTool` plus `PermissionRequest`/`PreToolUse` hooks to allow read tools, allow edit tools only under edit-capable policy, and deny Bash unless explicitly allowed. | `AskUserQuestion` is denied with a recoverable non-interactive message. |
+| OpenAI Agents SDK | Uses `needsApproval` on write/Bash tools, inspects `streamed.interruptions`, calls `state.approve()` or `state.reject()`, and resumes the same run state. | Long-lived human approval storage and later resume are out of scope for this runner. |
+| Codex CLI | Uses `codex exec --ask-for-approval never` with `read-only` or `workspace-write` sandbox based on permission mode. | Mid-run approval UI and clarifying prompts are not handled by the external runner. |
+| Claude CLI | Uses `claude -p` with permission mode plus explicit allowed/disallowed tools so normal write runs do not ask. | Mid-run interactive input is not handled in non-interactive `-p` mode. |
 
 The runner only receives the environment variable name, not the credential value. Do not put provider keys in prompts, command history examples, README edits, or plugin manifests.
 
@@ -380,9 +390,9 @@ Check routing before a real run:
 node scripts/run-agent-sdk.mjs --agent-sequence context-explorer,implementation-worker,code-reviewer --dry-run --prompt "probe"
 ```
 
-Each dry-run line is sanitized. It shows the selected `agent`, `sdk`, `mode`, `model`, `effort`, main CLI fallback target, configured env var names including `sdkEnv`, Codex profile/model env names, Codex sandbox/approval mapping, OpenAI write/Bash tool exposure, and fallback reason when one applies. It never prints credential values.
+Each dry-run line is sanitized. It shows the selected `agent`, `sdk`, `mode`, `model`, `effort`, main CLI fallback target, configured env var names including `sdkEnv`, Codex profile/model env names, approval/user-input handling flags, Codex sandbox/approval mapping, write/Bash tool exposure, and fallback reason when one applies. It never prints credential values.
 
-In sequence dry-runs, the printed `permissionMode`, `writeTools`, `bashTool`, `sandbox`, and `approvalPolicy` are the effective per-agent values after role presets and agent-specific permission env overrides.
+In sequence dry-runs, the printed `permissionMode`, `handlesApprovals`, `handlesUserInput`, `nonInteractiveApproval`, `writeTools`, `bashTool`, `sandbox`, and `approvalPolicy` are the effective per-agent values after role presets and agent-specific permission env overrides.
 
 The fallback prompt is sent back through the main harness agent, not through an external subagent. It includes the requested agent name, the sanitized fallback reason, and the original task so the main Claude Code CLI session can apply the same role and complexity policy. If an Opus fallback run fails because the account needs usage credits for 1M context, the runner retries once with `sonnet` and `high` effort for standard-context compatibility.
 

@@ -31,7 +31,7 @@ node <runner> --agent implementation-worker --permission-mode acceptEdits --cwd 
 
 Use the agent-specific `modeEnv` values to switch backends without editing the manifest. `anthropic` and `openai` select external provider mode with the matching SDK; `codexCli` selects local `codex exec`; `claudeCli` selects the main Claude CLI fallback path.
 
-For Codex CLI backend runs, `default` maps to `--sandbox read-only --ask-for-approval on-request`, `acceptEdits` maps to `--sandbox workspace-write --ask-for-approval on-request`, and `bypassPermissions` maps to `--sandbox workspace-write --ask-for-approval never`. `--allowed-tools` and `--disallowed-tools` are not applied by the Codex CLI backend.
+For Codex CLI backend runs, `default` maps to `--sandbox read-only --ask-for-approval never`; `acceptEdits` and `bypassPermissions` map to `--sandbox workspace-write --ask-for-approval never`. The runner cannot service mid-run Codex approval UI. `--allowed-tools` and `--disallowed-tools` are not applied by the Codex CLI backend.
 
 Use explicit API-key mode for one-off external provider runs:
 
@@ -56,6 +56,8 @@ Expose Bash only when it is explicitly needed:
 ```bash
 node <runner> --sdk openai --agent implementation-worker --allowed-tools Bash --cwd <current-workspace> --prompt "$ARGUMENTS"
 ```
+
+For all backends, Bash is not pre-approved unless `--allowed-tools Bash` or manifest `allowBash: true` is set. Claude CLI fallback uses non-interactive `claude -p`, so approval prompts and clarifying questions are not handled by the runner.
 
 Use explicit bearer-token mode:
 
