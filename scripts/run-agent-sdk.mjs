@@ -161,6 +161,52 @@ function getOption(args, key, envName, defaultValue) {
   return args[key] ?? process.env[envName] ?? defaultValue;
 }
 
+function parseEnvValue(rawValue) {
+  let value = rawValue.trim();
+  const commentIndex = value.search(/\s#/);
+  if (commentIndex >= 0) {
+    value = value.slice(0, commentIndex).trimEnd();
+  }
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1);
+  }
+  return value;
+}
+
+function loadEnvFile(envPath, loadedEnvFiles = new Set()) {
+  const resolvedPath = path.resolve(envPath);
+  if (loadedEnvFiles.has(resolvedPath) || !fs.existsSync(resolvedPath)) {
+    return;
+  }
+  loadedEnvFiles.add(resolvedPath);
+  const content = fs.readFileSync(resolvedPath, "utf8");
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+    const normalized = line.startsWith("export ") ? line.slice("export ".length).trimStart() : line;
+    const equalsIndex = normalized.indexOf("=");
+    if (equalsIndex <= 0) {
+      continue;
+    }
+    const key = normalized.slice(0, equalsIndex).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || process.env[key] !== undefined) {
+      continue;
+    }
+    process.env[key] = parseEnvValue(normalized.slice(equalsIndex + 1));
+  }
+}
+
+function loadLocalEnvFiles(cwd) {
+  const loadedEnvFiles = new Set();
+  loadEnvFile(path.join(root, ".env.local"), loadedEnvFiles);
+  loadEnvFile(path.join(process.cwd(), ".env.local"), loadedEnvFiles);
+  if (cwd) {
+    loadEnvFile(path.join(cwd, ".env.local"), loadedEnvFiles);
+  }
+}
+
 function setIfPresent(env, key, value) {
   if (value !== undefined && value !== "") {
     env[key] = value;
@@ -273,6 +319,18 @@ function readJsonIfPresent(configPath) {
 
 function resolveConfigPath(args) {
   const configured = getOption(args, "agent-provider-config", "CODEX_HARNESS_AGENT_PROVIDER_CONFIG", DEFAULT_PROVIDER_CONFIG);
+  const candidates = [configured];
+  if (configured === DEFAULT_PROVIDER_CONFIG) {
+    candidates.push("config/agent-provider.json");
+  } else if (configured === "config/agent-provider.json") {
+    candidates.push(DEFAULT_PROVIDER_CONFIG);
+  }
+  for (const candidate of candidates) {
+    const resolvedPath = path.resolve(root, candidate);
+    if (fs.existsSync(resolvedPath)) {
+      return resolvedPath;
+    }
+  }
   return path.resolve(root, configured);
 }
 
@@ -1649,6 +1707,7 @@ ${previousOutputs.join("\n\n---\n\n")}`;
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  loadLocalEnvFiles();
   if (args.help) {
     process.stdout.write(HELP);
     return;
@@ -1663,6 +1722,7 @@ async function main() {
   }
 
   const cwd = path.resolve(getOption(args, "cwd", "CODEX_HARNESS_CWD", process.cwd()));
+  loadLocalEnvFiles(cwd);
   const pluginPath = path.resolve(root, getOption(args, "plugin-path", "CODEX_HARNESS_PLUGIN_PATH", "plugins/codex-harness"));
   const maxTurns = args["max-turns"] ? Number.parseInt(args["max-turns"], 10) : undefined;
   if (args["max-turns"] && (!Number.isInteger(maxTurns) || maxTurns < 1)) {

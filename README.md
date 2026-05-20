@@ -176,7 +176,7 @@ When using a plugin command from a target project, add the harness or marketplac
 claude --add-dir C:\Users\you\.claude\plugins\marketplaces\codex4claude
 ```
 
-Use `.env.local.example` as a key-free template for local provider settings. Keep real provider URLs and credentials in your shell or ignored `.env.local` files only.
+Use `.env.local.example` as a key-free template for local provider settings. The runner loads ignored `.env.local` files from the harness/marketplace checkout and the selected `--cwd` workspace, without overriding variables already present in the shell. Keep real provider URLs and credentials in your shell or ignored `.env.local` files only.
 
 Anthropic-compatible API-key mode on Linux and macOS:
 
@@ -256,7 +256,7 @@ The runner only receives the environment variable name, not the credential value
 
 ## Agent-Specific Provider Routing
 
-Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials. Each entry can name a `modeEnv` so `.env` files can select the backend per agent without editing JSON. Supported mode env values are `claudeCli`, `codexCli`, `anthropic`, `openai`, and `external`. `anthropic` and `openai` are aliases for `mode: "external"` plus the matching SDK. By default, checked-in agents use the Claude CLI fallback path for Max/Pro-compatible usage. Set an agent's mode env to `external`, `anthropic`, `openai`, or `codexCli` when that agent should leave the default Claude CLI path. If external provider env is incomplete or execution fails, the runner falls back to the main Claude CLI harness. External entries can also name an optional `sdkEnv` so `.env` files can declare the protocol next to the base URL/model/key. SDK selection priority is `--sdk`, then an `anthropic`/`openai` mode env alias, then agent-specific `sdkEnv`, then `CODEX_HARNESS_SDK`, then manifest `sdk`, then `anthropic`. Codex CLI entries use `mode: "codexCli"` and do not require a base URL or credential.
+Agent routing is controlled by the env-only provider manifest. The checked-in manifest names environment variables only; it does not store provider URLs or credentials. The default path is `config/agent-providers.json`; `config/agent-provider.json` is also accepted as a compatibility fallback when the plural file is absent. Each entry can name a `modeEnv` so `.env.local` files can select the backend per agent without editing JSON. Supported mode env values are `claudeCli`, `codexCli`, `anthropic`, `openai`, and `external`. `anthropic` and `openai` are aliases for `mode: "external"` plus the matching SDK. By default, checked-in agents use the Claude CLI fallback path for Max/Pro-compatible usage. Set an agent's mode env to `external`, `anthropic`, `openai`, or `codexCli` when that agent should leave the default Claude CLI path. If external provider env is incomplete or execution fails, the runner falls back to the main Claude CLI harness. External entries can also name an optional `sdkEnv` so `.env.local` files can declare the protocol next to the base URL/model/key. SDK selection priority is `--sdk`, then an `anthropic`/`openai` mode env alias, then agent-specific `sdkEnv`, then `CODEX_HARNESS_SDK`, then manifest `sdk`, then `anthropic`. Codex CLI entries use `mode: "codexCli"` and do not require a base URL or credential.
 
 Default routing:
 
