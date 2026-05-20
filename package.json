@@ -1,6 +1,6 @@
 {
   "name": "codex4claude",
-  "version": "1.0.1",
+  "version": "1.0.1-dev.0",
   "private": true,
   "type": "module",
   "description": "Claude Code Codex-style harness with optional multi-SDK external provider runner.",
